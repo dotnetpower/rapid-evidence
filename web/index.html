@@ -3,499 +3,326 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>rapid-evidence UI</title>
+  <title>rapid-evidence</title>
   <style>
     :root {
-      --bg: #020617;
-      --bg-soft: rgba(8, 15, 28, 0.72);
-      --bg-panel: rgba(6, 11, 21, 0.86);
-      --border: rgba(148, 163, 184, 0.18);
-      --border-strong: rgba(14, 116, 144, 0.55);
-      --text: #f8fafc;
-      --muted: #94a3b8;
-      --accent: #22c55e;
-      --accent-strong: #06b6d4;
-      --accent-soft: rgba(34, 197, 94, 0.18);
-      --shadow: 0 28px 80px -40px rgba(8, 145, 178, 0.55);
-      --radius: 24px;
+      --bg: #fafafa;
+      --surface: #ffffff;
+      --border: #e5e7eb;
+      --text: #111827;
+      --muted: #6b7280;
+      --accent: #2563eb;
+      --accent-soft: #eff6ff;
+      --success: #16a34a;
+      --danger: #dc2626;
+      --radius: 8px;
     }
 
     * { box-sizing: border-box; }
 
-    body {
+    html, body {
       margin: 0;
-      min-height: 100vh;
-      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg);
       color: var(--text);
-      background:
-        radial-gradient(circle at top, rgba(8, 145, 178, 0.24), transparent 28%),
-        radial-gradient(circle at bottom, rgba(34, 197, 94, 0.12), transparent 24%),
-        linear-gradient(180deg, #01040b, #01060f 18%, #020817 100%);
-    }
-
-    body::before {
-      content: "";
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      background:
-        linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
-      background-size: 24px 24px;
-      mask-image: linear-gradient(180deg, rgba(0,0,0,0.95), transparent 85%);
-      opacity: 0.4;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
     }
 
     .shell {
-      max-width: 1220px;
+      max-width: 960px;
       margin: 0 auto;
-      padding: 24px;
+      padding: 32px 24px 64px;
     }
 
-    .topbar {
+    header {
       display: flex;
-      align-items: center;
+      align-items: baseline;
       justify-content: space-between;
       gap: 16px;
-      margin-bottom: 18px;
-      padding: 18px 20px;
-      border: 1px solid rgba(34, 211, 238, 0.16);
-      border-radius: 999px;
-      background: rgba(3, 8, 18, 0.64);
-      backdrop-filter: blur(10px);
-      box-shadow: var(--shadow);
+      margin-bottom: 32px;
     }
 
-    .brand h1 {
+    header h1 {
       margin: 0;
-      font-size: 1.1rem;
-      letter-spacing: 0.18em;
-      text-transform: uppercase;
+      font-size: 1.25rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
     }
 
-    .brand p {
-      margin: 4px 0 0;
+    .subtitle {
       color: var(--muted);
-      font-size: 0.78rem;
-    }
-
-    .status-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      border-radius: 999px;
-      padding: 8px 10px;
-      background: rgba(34, 197, 94, 0.12);
-      border: 1px solid rgba(74, 222, 128, 0.25);
-      color: #b6f7d4;
-      font-size: 0.72rem;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-    }
-
-    .status-pill::before {
-      content: "";
-      width: 7px;
-      height: 7px;
-      border-radius: 999px;
-      background: #4ade80;
-      box-shadow: 0 0 0 4px rgba(74, 222, 128, 0.12);
-    }
-
-    .hero {
-      margin-bottom: 18px;
-      padding: 26px 28px;
-      border-radius: calc(var(--radius) + 4px);
-      border: 1px solid rgba(14, 116, 144, 0.28);
-      background:
-        linear-gradient(180deg, rgba(8, 17, 31, 0.9), rgba(4, 9, 19, 0.68)),
-        rgba(4, 10, 21, 0.72);
-      backdrop-filter: blur(10px);
-      box-shadow: var(--shadow);
-    }
-
-    .hero h2 {
-      margin: 0;
-      font-size: clamp(1.8rem, 5vw, 2.8rem);
-      letter-spacing: -0.04em;
-    }
-
-    .hero p {
-      max-width: 700px;
-      margin: 10px 0 0;
-      color: var(--muted);
-      line-height: 1.5;
+      font-size: 0.85rem;
     }
 
     .metrics {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
       gap: 12px;
-      margin-top: 18px;
+      margin-bottom: 24px;
     }
 
-    .metric-card {
-      padding: 14px 15px;
-      border-radius: 18px;
-      background: rgba(2, 6, 15, 0.72);
-      border: 1px solid rgba(148, 163, 184, 0.12);
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    .metric {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
     }
 
     .metric-label {
       display: block;
       color: var(--muted);
-      font-size: 0.68rem;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-      margin-bottom: 8px;
+      font-size: 0.75rem;
+      margin-bottom: 4px;
     }
 
     .metric-value {
       display: block;
       font-size: 1.5rem;
-      font-weight: 700;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
     }
 
     .layout {
       display: grid;
-      grid-template-columns: 1.2fr 0.8fr;
+      grid-template-columns: 1.4fr 1fr;
       gap: 16px;
     }
 
-    .panel {
-      padding: 18px;
-      border-radius: var(--radius);
+    .card {
+      background: var(--surface);
       border: 1px solid var(--border);
-      background: rgba(5, 10, 20, 0.82);
-      backdrop-filter: blur(10px);
-      box-shadow: var(--shadow);
+      border-radius: var(--radius);
+      padding: 20px;
     }
 
-    .panel-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      margin-bottom: 14px;
-    }
-
-    .panel-copy h3 {
-      margin: 0;
-      font-size: 1.03rem;
-    }
-
-    .panel-copy p {
-      margin: 4px 0 0;
-      color: var(--muted);
-      font-size: 0.86rem;
-      line-height: 1.4;
-    }
-
-    .control-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 10px;
-      margin-top: 12px;
-    }
-
-    .field {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      padding: 12px;
-      border-radius: 16px;
-      background: rgba(2, 6, 15, 0.78);
-      border: 1px solid rgba(148, 163, 184, 0.12);
-    }
-
-    .field label {
-      color: var(--muted);
-      font-size: 0.7rem;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-    }
-
-    .field input {
-      border: 1px solid rgba(14, 116, 144, 0.22);
-      border-radius: 10px;
-      background: rgba(3, 8, 17, 0.96);
-      color: var(--text);
-      padding: 10px 11px;
+    .card h2 {
+      margin: 0 0 4px;
       font-size: 0.95rem;
-      outline: none;
+      font-weight: 600;
     }
 
-    .field input:focus {
-      border-color: rgba(34, 197, 94, 0.52);
-      box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.12);
-    }
-
-    .textarea-wrap {
-      margin-top: 12px;
-      border-radius: 18px;
-      padding: 12px;
-      background: rgba(2, 6, 15, 0.82);
-      border: 1px solid rgba(148, 163, 184, 0.12);
-    }
-
-    textarea {
-      width: 100%;
-      min-height: 240px;
-      border: 0;
-      border-radius: 12px;
-      padding: 12px 12px 12px 12px;
-      background: rgba(2, 6, 15, 0.96);
-      color: var(--text);
-      resize: vertical;
-      font-size: 0.84rem;
-      line-height: 1.5;
-      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-    }
-
-    textarea:focus {
-      outline: 2px solid rgba(6, 182, 212, 0.34);
-      outline-offset: 2px;
-    }
-
-    .action-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      margin-top: 12px;
-    }
-
-    .helper-copy {
+    .card .hint {
       color: var(--muted);
-      font-size: 0.78rem;
+      font-size: 0.8rem;
+      margin: 0 0 16px;
     }
 
-    .primary-btn {
-      border: 0;
-      border-radius: 999px;
-      padding: 12px 16px;
-      font-weight: 700;
-      color: #021017;
-      cursor: pointer;
-      background: linear-gradient(135deg, #22c55e, #06b6d4);
-      box-shadow: 0 10px 28px -14px rgba(34, 197, 94, 0.84);
-      transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
-    }
-
-    .primary-btn:hover { transform: translateY(-1px); filter: brightness(1.05); }
-    .primary-btn:disabled { cursor: wait; opacity: 0.72; transform: none; }
-
-    .chips {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      margin-top: 12px;
-    }
-
-    .chip {
-      display: inline-flex;
-      align-items: center;
-      border-radius: 999px;
-      padding: 6px 9px;
-      font-size: 0.68rem;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      background: rgba(6, 182, 212, 0.12);
-      border: 1px solid rgba(14, 116, 144, 0.24);
-      color: #b7f6ff;
-    }
-
-    .panel-stack {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
-
-    .summary-card {
-      padding: 14px 15px;
-      border-radius: 18px;
-      background: linear-gradient(180deg, rgba(6, 11, 20, 0.9), rgba(2, 6, 15, 0.82));
-      border: 1px solid rgba(148, 163, 184, 0.12);
-    }
-
-    .summary-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-    }
-
-    .summary-title {
+    label {
       display: block;
       color: var(--muted);
-      font-size: 0.68rem;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
+      font-size: 0.75rem;
       margin-bottom: 6px;
     }
 
-    .summary-value {
-      font-size: 1.55rem;
-      font-weight: 700;
+    textarea, input[type="number"] {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-size: 0.85rem;
+      color: var(--text);
+      background: var(--surface);
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.12s ease, box-shadow 0.12s ease;
     }
 
-    .summary-desc {
-      margin-top: 6px;
-      color: var(--muted);
-      font-size: 0.78rem;
-      line-height: 1.4;
+    textarea {
+      min-height: 160px;
+      resize: vertical;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.82rem;
+      line-height: 1.5;
     }
 
-    .result-list {
-      display: flex;
-      flex-direction: column;
-      gap: 9px;
-      margin-top: 12px;
+    textarea:focus, input[type="number"]:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
     }
 
-    .result-item {
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .actions {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 10px;
-      padding: 12px 12px;
-      border-radius: 14px;
-      background: rgba(2, 6, 15, 0.78);
-      border: 1px solid rgba(148, 163, 184, 0.12);
-      color: var(--text);
+      gap: 12px;
+      margin-top: 16px;
     }
 
-    .result-item strong {
-      display: block;
-      font-size: 0.82rem;
-      margin-bottom: 4px;
-    }
-
-    .result-subline {
-      display: block;
+    .preview {
       color: var(--muted);
-      font-size: 0.7rem;
+      font-size: 0.8rem;
     }
 
-    .status-badge {
-      border-radius: 999px;
-      padding: 5px 8px;
-      font-size: 0.62rem;
-      font-weight: 700;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      background: rgba(6, 182, 212, 0.14);
-      color: #9cf4ff;
+    .preview strong {
+      color: var(--text);
+      font-weight: 600;
     }
 
-    .empty-state {
-      padding: 16px;
-      border-radius: 14px;
-      border: 1px dashed rgba(148, 163, 184, 0.24);
+    button {
+      border: 1px solid var(--accent);
+      background: var(--accent);
+      color: #fff;
+      border-radius: 6px;
+      padding: 8px 16px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.12s ease;
+    }
+
+    button:hover:not(:disabled) { background: #1d4ed8; border-color: #1d4ed8; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    .pool {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+
+    .pool-value {
+      font-size: 1.25rem;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .pool-state {
       color: var(--muted);
       font-size: 0.78rem;
+    }
+
+    .pool-desc {
+      color: var(--muted);
+      font-size: 0.8rem;
+      margin: 0 0 16px;
+    }
+
+    .results {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .result {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 0.82rem;
+    }
+
+    .result-url {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .badge {
+      font-size: 0.7rem;
+      color: var(--muted);
+      padding: 2px 6px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      white-space: nowrap;
+      background: #f9fafb;
+    }
+
+    .badge.ok { color: var(--success); border-color: #bbf7d0; background: #f0fdf4; }
+    .badge.err { color: var(--danger); border-color: #fecaca; background: #fef2f2; }
+
+    .empty {
+      color: var(--muted);
+      font-size: 0.82rem;
+      padding: 12px 0;
       text-align: center;
     }
 
-    @media (max-width: 900px) {
+    @media (max-width: 760px) {
       .layout { grid-template-columns: 1fr; }
       .metrics { grid-template-columns: 1fr; }
-      .control-grid { grid-template-columns: 1fr; }
+      .grid-3 { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
   <div class="shell">
-    <div class="topbar">
-      <div class="brand">
-        <h1>rapid-evidence</h1>
-        <p>premium burst collection control plane</p>
-      </div>
-      <div class="status-pill">live workflow</div>
-    </div>
+    <header>
+      <h1>rapid-evidence</h1>
+      <span class="subtitle" id="systemStatus">Idle</span>
+    </header>
 
-    <section class="hero">
-      <h2>Elegant scheduling, clean execution.</h2>
-      <p>Run burst evidence collection with a refined command surface. Parse sources, provision warm capacity, and review outcomes without losing focus.</p>
-      <div class="metrics">
-        <div class="metric-card">
-          <span class="metric-label">ready nodes</span>
-          <span class="metric-value" id="metricReady">1</span>
-        </div>
-        <div class="metric-card">
-          <span class="metric-label">active workers</span>
-          <span class="metric-value" id="metricActive">0</span>
-        </div>
-        <div class="metric-card">
-          <span class="metric-label">queued items</span>
-          <span class="metric-value" id="metricQueued">0</span>
-        </div>
+    <section class="metrics">
+      <div class="metric">
+        <span class="metric-label">Ready</span>
+        <span class="metric-value" id="metricReady">0</span>
+      </div>
+      <div class="metric">
+        <span class="metric-label">Active</span>
+        <span class="metric-value" id="metricActive">0</span>
+      </div>
+      <div class="metric">
+        <span class="metric-label">Queued</span>
+        <span class="metric-value" id="metricQueued">0</span>
       </div>
     </section>
 
     <section class="layout">
-      <article class="panel">
-        <div class="panel-header">
-          <div class="panel-copy">
-            <h3>Collection input</h3>
-            <p>Drop in URLs, tune the warm pool, and submit a clean batch.</p>
-          </div>
-          <div class="status-pill" id="systemBadge">idle</div>
-        </div>
+      <article class="card">
+        <h2>Targets</h2>
+        <p class="hint">One URL per line, or separated by comma or semicolon.</p>
 
-        <div class="textarea-wrap">
-          <textarea id="urls">https://example.com/a, https://example.com/b
-https://example.com/a; https://example.com/c</textarea>
-        </div>
+        <textarea id="urls">https://example.com/a
+https://example.com/b
+https://example.com/c</textarea>
 
-        <div class="control-grid">
-          <div class="field">
+        <div class="grid-3">
+          <div>
             <label for="minVm">min_vm</label>
             <input type="number" id="minVm" value="1" min="1" />
           </div>
-          <div class="field">
+          <div>
             <label for="maxVm">max_vm</label>
             <input type="number" id="maxVm" value="3" min="1" />
           </div>
-          <div class="field">
+          <div>
             <label for="batchSize">batch_size</label>
             <input type="number" id="batchSize" value="4" min="1" />
           </div>
         </div>
 
-        <div class="action-row">
-          <div class="helper-copy">Parsed targets update instantly. Use the run button to submit a batch.</div>
-          <button class="primary-btn" id="runBtn">Run batch</button>
+        <div class="actions">
+          <div class="preview" id="parsePreview"></div>
+          <button id="runBtn">Run</button>
         </div>
-
-        <div class="chips" id="parsePreview"></div>
       </article>
 
-      <aside class="panel-stack">
-        <article class="panel">
-          <div class="panel-header">
-            <div class="panel-copy">
-              <h3>Run summary</h3>
-              <p>Execution signals and pool posture.</p>
-            </div>
-          </div>
+      <aside class="card">
+        <h2>Run</h2>
+        <p class="hint">Pool state and latest results.</p>
 
-          <div class="summary-card">
-            <div class="summary-row">
-              <div>
-                <span class="summary-title">pool slice</span>
-                <span class="summary-value" id="poolValue">0 / 0</span>
-              </div>
-              <span class="status-badge" id="poolState">standby</span>
-            </div>
-            <div class="summary-desc" id="poolSummary">No batch has been submitted yet.</div>
-          </div>
+        <div class="pool">
+          <span class="pool-value" id="poolValue">0 / 0</span>
+          <span class="pool-state" id="poolState">standby</span>
+        </div>
+        <p class="pool-desc" id="poolSummary">No run yet.</p>
 
-          <div class="result-list" id="results">
-            <div class="empty-state">Results will appear here after the first run.</div>
-          </div>
-        </article>
+        <div class="results" id="results">
+          <div class="empty">No results yet.</div>
+        </div>
       </aside>
     </section>
   </div>

@@ -11,7 +11,7 @@ const metricQueued = document.getElementById('metricQueued');
 const poolValue = document.getElementById('poolValue');
 const poolState = document.getElementById('poolState');
 const poolSummary = document.getElementById('poolSummary');
-const systemBadge = document.getElementById('systemBadge');
+const systemStatus = document.getElementById('systemStatus');
 
 function renderPreview(text) {
   const parts = text
@@ -21,32 +21,35 @@ function renderPreview(text) {
   const unique = [...new Set(parts)];
   const duplicates = parts.length - unique.length;
 
-  parsePreview.innerHTML = '';
-  parsePreview.insertAdjacentHTML('beforeend', `<div class="chip">parsed ${unique.length}</div>`);
-  parsePreview.insertAdjacentHTML('beforeend', `<div class="chip">duplicates ${duplicates}</div>`);
-  if (unique.length > 0) {
-    parsePreview.insertAdjacentHTML('beforeend', `<div class="chip">sample ${unique.slice(0, 3).join(' | ')}</div>`);
-  } else {
-    parsePreview.insertAdjacentHTML('beforeend', `<div class="chip">sample none</div>`);
-  }
+  parsePreview.innerHTML = `<strong>${unique.length}</strong> parsed · ${duplicates} duplicate${duplicates === 1 ? '' : 's'}`;
 
   return unique;
 }
 
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (ch) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  })[ch]);
+}
+
 function renderResultItems(items) {
   if (!Array.isArray(items) || items.length === 0) {
-    return '<div class="empty-state">No results yet.</div>';
+    return '<div class="empty">No results.</div>';
   }
 
-  return items.map((item) => `
-    <div class="result-item">
-      <div>
-        <strong>${item.url}</strong>
-        <span class="result-subline">${item.status}</span>
-      </div>
-      <span class="status-badge">${item.status}</span>
-    </div>
-  `).join('');
+  return items.map((item) => {
+    const status = String(item.status || '').toLowerCase();
+    const cls = status === 'ok' || status === 'success' ? 'ok' : (status === 'error' || status === 'failed' ? 'err' : '');
+    return `
+    <div class="result">
+      <span class="result-url" title="${escapeHtml(item.url)}">${escapeHtml(item.url)}</span>
+      <span class="badge ${cls}">${escapeHtml(item.status)}</span>
+    </div>`;
+  }).join('');
 }
 
 function updatePoolUI(data) {
@@ -60,13 +63,13 @@ function updatePoolUI(data) {
   metricQueued.textContent = String(Math.max(0, data.valid_count - running));
   poolValue.textContent = `${running} / ${idle + running + provisioning}`;
   poolState.textContent = running > 0 ? 'active' : 'standby';
-  poolSummary.textContent = `${running} worker${running === 1 ? '' : 's'} active, ${provisioning} provisioning, ${terminating} terminating.`;
+  poolSummary.textContent = `${running} active · ${provisioning} provisioning · ${terminating} terminating`;
 }
 
 function setRunningState(isRunning) {
   runBtn.disabled = isRunning;
-  runBtn.textContent = isRunning ? 'Running…' : 'Run batch';
-  systemBadge.textContent = isRunning ? 'running' : 'idle';
+  runBtn.textContent = isRunning ? 'Running…' : 'Run';
+  systemStatus.textContent = isRunning ? 'Running' : 'Idle';
 }
 
 urlsEl.addEventListener('input', () => renderPreview(urlsEl.value));
@@ -83,7 +86,7 @@ runBtn.addEventListener('click', async () => {
   };
 
   setRunningState(true);
-  results.innerHTML = '<div class="empty-state">Submitting run…</div>';
+  results.innerHTML = '<div class="empty">Submitting…</div>';
 
   try {
     const response = await fetch('/run', {
@@ -100,9 +103,9 @@ runBtn.addEventListener('click', async () => {
     updatePoolUI(data);
     results.innerHTML = renderResultItems(data.results);
   } catch (error) {
-    results.innerHTML = `<div class="empty-state">${error.message}</div>`;
+    results.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
     poolState.textContent = 'error';
-    poolSummary.textContent = 'The run could not complete. Check the backend status and try again.';
+    poolSummary.textContent = 'Run failed. Check the backend and retry.';
   } finally {
     setRunningState(false);
   }

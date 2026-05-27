@@ -3,6 +3,7 @@ from rapid_evidence.core.models import FetchRequest, FetchResult, RequestStatus,
 from rapid_evidence.orchestrator.scheduler import SurgeOrchestrator
 from rapid_evidence.spot.azure_cli_provider import AzureCliSpotVmProvider, AzureSpotVmConfig
 from rapid_evidence.spot.fake import InMemorySpotVmProvider
+from rapid_evidence.spot.manager import SpotPoolManager
 from rapid_evidence.spot.models import SpotPoolConfig
 from rapid_evidence.spot.scheduler import SpotVmScheduler
 
@@ -18,6 +19,7 @@ __all__ = [
     "SurgeOrchestrator",
     "SpotPoolConfig",
     "SpotVmScheduler",
+    "SpotPoolManager",
     "InMemorySpotVmProvider",
     "AzureCliSpotVmProvider",
     "AzureSpotVmConfig",

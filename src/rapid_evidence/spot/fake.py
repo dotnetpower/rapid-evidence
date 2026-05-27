@@ -48,6 +48,23 @@ class InMemorySpotVmProvider:
             terminated.append(node_id)
         return tuple(terminated)
 
+    def simulate_state(self, node_id: str, state: SpotNodeState, *, error: str | None = None) -> None:
+        node = self._nodes.get(node_id)
+        if node is None:
+            raise KeyError(node_id)
+        self._nodes[node_id] = SpotNode(
+            node_id=node.node_id,
+            name=node.name,
+            state=state,
+            public_ip=node.public_ip,
+            outbound_ip=node.outbound_ip,
+            inflight=node.inflight,
+            vm_size=node.vm_size,
+            zone=node.zone,
+            metadata=node.metadata,
+            error=error or node.error,
+        )
+
     @property
     def nodes(self) -> dict[str, SpotNode]:
         return self._nodes
