@@ -1,0 +1,28 @@
+[project]
+name = "rapid-evidence"
+version = "0.1.0"
+description = "Policy-governed burst evidence collection toolkit"
+readme = "README.md"
+requires-python = ">=3.12,<4"
+dependencies = [
+    "fastapi>=0.115.0",
+    "httpx>=0.28.0",
+    "uvicorn>=0.30.0",
+]
+
+[project.scripts]
+rapidfetch = "rapid_evidence.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.26.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rapid_evidence"]
+
+[tool.hatch.build.targets.wheel.sources]
+"src" = ""
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+addopts = "-q"
