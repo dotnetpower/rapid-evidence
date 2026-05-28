@@ -196,6 +196,10 @@ def test_request_quota_increase_rejects_invalid_input():
         regions_mod.request_quota_increase(
             "eastus", spot_quota_name="standardDASv5Family", new_limit=0
         )
+    with pytest.raises(ValueError, match="exceeds sane upper bound"):
+        regions_mod.request_quota_increase(
+            "eastus", spot_quota_name="standardDASv5Family", new_limit=999_999
+        )
 
 
 def test_jobs_get_returns_snapshot_not_live_reference():

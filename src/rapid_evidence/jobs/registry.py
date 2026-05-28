@@ -179,8 +179,10 @@ async def run_tracked(
     """Run `coro_factory()` inside a tracked job.
 
     Returns the final `BackgroundJob` snapshot plus the awaited result
-    (or None on failure). Never re-raises — the failure is captured in
-    the registry as a `failed` job with `error=<str>`.
+    (or None on failure). Captures any `Exception` as a `failed` job
+    with `error=<str>` so callers do not need to wrap. `CancelledError`
+    is recorded as `cancelled` and re-raised so the surrounding task
+    can finish unwinding.
     """
     job = registry.start(name, metadata=metadata)
     try:
@@ -211,8 +213,11 @@ def _coerce_result(value: Any) -> dict[str, Any] | None:
             converted = to_dict()
             if isinstance(converted, dict):
                 return converted
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "BackgroundJob result.to_dict() raised %s; falling back to repr",
+                exc,
+            )
     if isinstance(value, list):
         return {"items": value, "count": len(value)}
     return {"value": str(value)}

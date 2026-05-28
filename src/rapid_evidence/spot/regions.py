@@ -348,6 +348,10 @@ def request_quota_increase(
         raise ValueError(f"invalid spot_quota_name: {spot_quota_name!r}")
     if new_limit <= 0:
         raise ValueError("new_limit must be positive")
+    if new_limit > 100_000:
+        # Defensive cap: Azure subscription-level vCPU limits are not
+        # in this ballpark, so a typo (extra zero) is the likely cause.
+        raise ValueError("new_limit exceeds sane upper bound (100000)")
     return {
         "region": region,
         "spot_quota_name": spot_quota_name,
