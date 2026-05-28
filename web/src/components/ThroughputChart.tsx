@@ -11,6 +11,7 @@ import {
   Area,
 } from "recharts";
 import { api, type MetricSample } from "../lib/api";
+import { useI18n } from "../lib/i18n";
 
 const WINDOWS: { label: string; seconds: number }[] = [
   { label: "15m", seconds: 15 * 60 },
@@ -42,6 +43,7 @@ function toRows(samples: MetricSample[]): ChartRow[] {
 
 export function ThroughputChart() {
   const [windowSeconds, setWindowSeconds] = useState(WINDOWS[1].seconds);
+  const { t } = useI18n();
   const series = useQuery({
     queryKey: ["timeseries", windowSeconds],
     queryFn: () => api.metricsTimeseries(windowSeconds),
@@ -57,7 +59,7 @@ export function ThroughputChart() {
   return (
     <section className="panel">
       <div className="panel-head">
-        <span className="title">큐 깊이 vs VM 수 vs 처리율</span>
+        <span className="title">{t("chart.title")}</span>
         <div className="toggle">
           {WINDOWS.map((w) => (
             <button
@@ -72,16 +74,16 @@ export function ThroughputChart() {
       </div>
       <div style={{ padding: "12px 14px 6px" }}>
         <div style={{ display: "flex", gap: 14, fontSize: 11, color: "var(--text-muted)", paddingBottom: 8 }}>
-          <Legend color="var(--info)">큐 깊이 (backlog)</Legend>
-          <Legend color="var(--violet)" dashed>활성 VM 수</Legend>
-          <Legend color="var(--ok)">처리율 req/s</Legend>
+          <Legend color="var(--info)">{t("chart.legend.backlog")}</Legend>
+          <Legend color="var(--violet)" dashed>{t("chart.legend.vms")}</Legend>
+          <Legend color="var(--ok)">{t("chart.legend.tp")}</Legend>
         </div>
         <div style={{ width: "100%", height: 260 }}>
           {rows.length < 2 ? (
             <div className="empty">
               {series.isLoading
-                ? "샘플 수집 중…"
-                : "샘플 부족 — 몇 초 후 다시 표시됩니다."}
+                ? t("chart.collecting")
+                : t("chart.notEnough")}
             </div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">

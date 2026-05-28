@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
 import re
 from contextlib import asynccontextmanager
@@ -24,6 +26,12 @@ from rapid_evidence.spot.models import SpotNodeState, SpotPoolConfig
 from rapid_evidence.spot.scheduler import SpotVmScheduler
 from rapid_evidence.spot.sizing import estimate_spot_capacity
 from rapid_evidence.storage.filesystem import FileSystemResultSink
+from rapid_evidence.worker import (
+    HttpWorkerTransport,
+    InMemoryWorkerTransport,
+    RemoteWorkerSource,
+    WorkerTransport,
+)
 
 
 def _env_int(name: str, default: int) -> int:
@@ -113,11 +121,43 @@ def default_result_sink() -> FileSystemResultSink:
     )
 
 
+def default_worker_transport_factory(provider) -> WorkerTransport:
+    """Pick a WorkerTransport that matches the active Spot provider.
+
+    - `in-memory`: returns `InMemoryWorkerTransport` with a configurable
+      simulated latency so the dashboard demo shows real throughput.
+    - `azure-cli`: returns `HttpWorkerTransport` keyed on the provider's
+      shared secret. The agent is installed via cloud-init.
+    """
+    provider_name = getattr(provider, "provider_name", "unknown")
+    if provider_name == "azure-cli":
+        return HttpWorkerTransport(
+            shared_secret=provider.agent_shared_secret,
+            agent_port=provider.agent_port,
+            scheme=os.environ.get("RAPID_EVIDENCE_AGENT_SCHEME", "http"),
+            connect_timeout_seconds=_env_float(
+                "RAPID_EVIDENCE_AGENT_CONNECT_TIMEOUT_SECONDS", 5.0
+            ),
+            request_timeout_seconds=_env_float(
+                "RAPID_EVIDENCE_AGENT_REQUEST_TIMEOUT_SECONDS", 120.0
+            ),
+        )
+    # in-memory / unknown — fall back to the in-process echo transport
+    # so the developer loop and tests do not need real VMs.
+    return InMemoryWorkerTransport(
+        simulated_delay_seconds=_env_float(
+            "RAPID_EVIDENCE_AGENT_DEMO_LATENCY_SECONDS", 0.0
+        ),
+    )
+
+
 def build_batch_registry(
     *,
     source_client_factory=None,
     sink_factory=None,
     default_workers: int | None = None,
+    pool_manager: SpotPoolManager | None = None,
+    worker_transport: WorkerTransport | None = None,
 ) -> BatchRegistry:
     # Resolve through the module globals so tests can monkeypatch the
     # default factory after import.
@@ -125,9 +165,30 @@ def build_batch_registry(
     sink_builder = sink_factory or default_result_sink
     sink = sink_builder()
     workers = default_workers or _env_int("RAPID_EVIDENCE_BATCH_WORKERS", 4)
+    remote_enabled = (
+        pool_manager is not None
+        and worker_transport is not None
+        and _env_bool("RAPID_EVIDENCE_REMOTE_DISPATCH", True)
+    )
 
     def executor_factory(source: str) -> BatchExecutor:
-        return BatchExecutor(source_client=factory(source), sink=sink)
+        if remote_enabled:
+            policy = default_policy_store().require(source)
+            source_client = RemoteWorkerSource(
+                pool_manager=pool_manager,
+                transport=worker_transport,
+                max_attempts=max(1, policy.max_attempts),
+                max_body_bytes=policy.max_request_bytes,
+                request_timeout_seconds=_env_float(
+                    "RAPID_EVIDENCE_FETCH_TIMEOUT_SECONDS", 30.0
+                ),
+                reservation_wait_seconds=_env_float(
+                    "RAPID_EVIDENCE_RESERVE_WAIT_SECONDS", 30.0
+                ),
+            )
+        else:
+            source_client = factory(source)
+        return BatchExecutor(source_client=source_client, sink=sink)
 
     return BatchRegistry(executor_factory=executor_factory, default_workers=workers)
 
@@ -136,6 +197,7 @@ def build_batch_registry(
 async def lifespan(app: FastAPI):
     autostart = _env_bool("RAPID_EVIDENCE_POOL_AUTOSTART", True)
     manager: SpotPoolManager | None = None
+    transport: WorkerTransport | None = None
     if autostart:
         manager = build_pool_manager()
         try:
@@ -143,9 +205,18 @@ async def lifespan(app: FastAPI):
         except Exception:
             await manager.stop()
             raise
+        try:
+            transport = default_worker_transport_factory(manager.scheduler.provider)
+        except Exception:
+            await manager.stop()
+            raise
     app.state.pool_manager = manager
+    app.state.worker_transport = transport
 
-    registry = build_batch_registry()
+    registry = build_batch_registry(
+        pool_manager=manager,
+        worker_transport=transport,
+    )
     app.state.batch_registry = registry
 
     def _snapshot() -> Any:
@@ -167,16 +238,79 @@ async def lifespan(app: FastAPI):
     await collector.start()
     app.state.metrics_collector = collector
 
+    eviction_task: asyncio.Task[None] | None = None
+    if manager is not None:
+        eviction_task = asyncio.create_task(
+            _drain_evictions_loop(
+                manager,
+                registry,
+                interval_seconds=_env_float(
+                    "RAPID_EVIDENCE_EVICTION_DRAIN_INTERVAL_SECONDS", 2.0
+                ),
+            ),
+            name="rapid-evidence-eviction-drain",
+        )
+    app.state.eviction_drain_task = eviction_task
+
     try:
         yield
     finally:
+        if eviction_task is not None:
+            eviction_task.cancel()
+            try:
+                await eviction_task
+            except (asyncio.CancelledError, Exception):
+                pass
         await collector.stop()
         await registry.stop_all()
+        if transport is not None:
+            try:
+                await transport.aclose()
+            except Exception:
+                pass
         if manager is not None:
             await manager.stop()
         app.state.metrics_collector = None
         app.state.batch_registry = None
         app.state.pool_manager = None
+        app.state.worker_transport = None
+        app.state.eviction_drain_task = None
+
+
+async def _drain_evictions_loop(
+    manager: SpotPoolManager,
+    registry: BatchRegistry,
+    *,
+    interval_seconds: float,
+) -> None:
+    """Forward EvictionEvent.requeue_task_ids to the batch registry.
+
+    Runs forever; cancelled by the lifespan shutdown. Each iteration
+    drains the manager's eviction buffer in O(1) (it is a deque under
+    the hood) and routes the affected request IDs to whichever batch
+    they belong to via `registry.notify_eviction`. The RemoteWorkerSource
+    is what actually retries the fetch on a different node; this loop
+    only exists so the UI can flag instability.
+    """
+    interval = max(0.25, interval_seconds)
+    while True:
+        try:
+            events = manager.drain_eviction_events()
+            for event in events:
+                if not event.requeue_task_ids:
+                    continue
+                registry.notify_eviction(
+                    requeue_task_ids=event.requeue_task_ids,
+                    reason=event.reason,
+                )
+        except Exception as exc:  # noqa: BLE001
+            logging.getLogger(__name__).warning(
+                "eviction drain loop iteration failed: %s", exc
+            )
+        try:
+            await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            raise
 
 
 app = FastAPI(lifespan=lifespan)
@@ -500,6 +634,8 @@ def dashboard_summary(request: Request):
             "config": snap.get("config"),
             "counters": snap.get("counters"),
             "metrics": snap.get("metrics"),
+            "nodes": snap.get("nodes", []),
+            "recent_evictions": snap.get("recent_evictions", []),
         }
 
     latest = collector.latest() if collector is not None else None
@@ -517,4 +653,112 @@ def dashboard_summary(request: Request):
         "sample_interval_seconds": (
             collector.sample_interval_seconds if collector is not None else None
         ),
+    }
+
+
+# ----- scaffold endpoints for the disabled-pages session ------------------
+# Each endpoint returns a safe snapshot (or empty list) so the new
+# sidebar pages render without errors. The follow-up sessions own the
+# actual logic; do not embed business behaviour here.
+
+_SCALING_EVENT_TYPES = frozenset(
+    {
+        "node_provisioned",
+        "node_evicted",
+        "scale_up",
+        "scale_down",
+        "node_replaced",
+    }
+)
+
+
+@app.get("/events")
+def list_events(request: Request, since: str | None = None, limit: int = 200):
+    manager: SpotPoolManager | None = getattr(request.app.state, "pool_manager", None)
+    if manager is None or not manager.running:
+        return {"events": []}
+    events = manager.snapshot().get("recent_events", []) or []
+    if since:
+        events = [e for e in events if (e.get("timestamp") or "") > since]
+    # `limit` bounds payload size; clamp to a sane window.
+    bounded = max(1, min(int(limit), 1000))
+    return {"events": events[-bounded:]}
+
+
+@app.get("/scaling/timeline")
+def scaling_timeline(request: Request, window_seconds: float = 3600.0):
+    collector: MetricsCollector | None = getattr(
+        request.app.state, "metrics_collector", None
+    )
+    manager: SpotPoolManager | None = getattr(request.app.state, "pool_manager", None)
+    samples = (
+        [s.to_dict() for s in collector.query(window_seconds)]
+        if collector is not None
+        else []
+    )
+    events: list[dict[str, Any]] = []
+    if manager is not None and manager.running:
+        recent = manager.snapshot().get("recent_events", []) or []
+        events = [e for e in recent if e.get("event_type") in _SCALING_EVENT_TYPES]
+    return {"window_seconds": window_seconds, "samples": samples, "events": events}
+
+
+@app.get("/quota/status")
+def quota_status(request: Request):
+    manager: SpotPoolManager | None = getattr(request.app.state, "pool_manager", None)
+    if manager is None or not manager.running:
+        return {"observed": False}
+    quota = manager.snapshot().get("quota")
+    if quota is None:
+        return {"observed": False}
+    return {"observed": True, **quota}
+
+
+@app.get("/regions/status")
+def regions_status(request: Request):
+    manager: SpotPoolManager | None = getattr(request.app.state, "pool_manager", None)
+    if manager is None or not manager.running:
+        return {"regions": []}
+    snap = manager.snapshot()
+    nodes = snap.get("nodes", []) or []
+    recent_evictions = snap.get("recent_evictions", []) or []
+    evictions_by_node: dict[str, int] = {}
+    for ev in recent_evictions:
+        node_id = ev.get("node_id")
+        if node_id:
+            evictions_by_node[node_id] = evictions_by_node.get(node_id, 0) + 1
+    buckets: dict[str | None, dict[str, Any]] = {}
+    for node in nodes:
+        metadata = node.get("metadata") or {}
+        region = metadata.get("region") if isinstance(metadata, dict) else None
+        bucket = buckets.setdefault(
+            region,
+            {"region": region, "nodes": 0, "ready": 0, "busy": 0, "evictions_recent": 0},
+        )
+        bucket["nodes"] += 1
+        state = node.get("state")
+        if state == "ready":
+            bucket["ready"] += 1
+        elif state == "busy":
+            bucket["busy"] += 1
+        bucket["evictions_recent"] += evictions_by_node.get(node.get("node_id"), 0)
+    return {"regions": list(buckets.values())}
+
+
+@app.get("/batches/{batch_id}/timeline")
+def batch_timeline(batch_id: str, request: Request):
+    registry = _require_registry(request)
+    record = registry.get(batch_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="batch not found")
+    history = getattr(record, "history", None) or []
+    return {
+        "events": [
+            {
+                "timestamp": getattr(e, "timestamp", None) or e.get("timestamp"),
+                "event_type": getattr(e, "event_type", None) or e.get("event_type"),
+                "payload": getattr(e, "payload", None) or e.get("payload", {}),
+            }
+            for e in history
+        ],
     }

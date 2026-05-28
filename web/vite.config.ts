@@ -5,14 +5,15 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   plugins: [react()],
   server: {
-    port: 5173,
+    port: 5175,
+    strictPort: true,
     proxy: {
-      "/health": "http://localhost:8000",
-      "/pool": "http://localhost:8000",
-      "/batches": "http://localhost:8000",
-      "/metrics": "http://localhost:8000",
-      "/dashboard": "http://localhost:8000",
-      "/run": "http://localhost:8000",
+      "/health": "http://localhost:8800",
+      "/pool": "http://localhost:8800",
+      "/batches": "http://localhost:8800",
+      "/metrics": "http://localhost:8800",
+      "/dashboard": "http://localhost:8800",
+      "/run": "http://localhost:8800",
     },
   },
   test: {

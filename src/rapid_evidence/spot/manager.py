@@ -8,6 +8,7 @@ from typing import Any
 from rapid_evidence.core.time import utc_now_iso
 from rapid_evidence.spot.models import (
     EvictionEvent,
+    QuotaSnapshot,
     SpotCapacityPlan,
     SpotNode,
     SpotNodeState,
@@ -111,6 +112,13 @@ class SpotPoolManager:
         self._events: list[PoolEvent] = []
         self._metrics = PoolMetrics()
         self._eviction_events: list[EvictionEvent] = []
+        # Separate, never-drained observability ring buffer so that
+        # `snapshot()` can still surface recent evictions even when a
+        # background drain task is consuming `_eviction_events`.
+        self._eviction_history: list[EvictionEvent] = []
+        # Last observed provider quota, populated by future quota probe.
+        # Surfaced via snapshot()["quota"] for the dashboard /quota page.
+        self._last_quota: QuotaSnapshot | None = None
         self._running = False
         self._heartbeat_task: asyncio.Task[None] | None = None
         self._reconcile_task: asyncio.Task[None] | None = None
@@ -248,6 +256,11 @@ class SpotPoolManager:
             overflow = len(self._eviction_events) - self._event_buffer
             if overflow > 0:
                 del self._eviction_events[:overflow]
+            # Observability history is independent of the drain buffer.
+            self._eviction_history.extend(events)
+            hist_overflow = len(self._eviction_history) - self._event_buffer
+            if hist_overflow > 0:
+                del self._eviction_history[:hist_overflow]
         self._record(
             "heartbeat",
             {
@@ -444,6 +457,44 @@ class SpotPoolManager:
             await asyncio.to_thread(self.scheduler.release, node_ids)
         self._record("release", {"node_ids": list(node_ids)})
 
+    # ----- node introspection / fault injection ------------------------
+
+    def get_node(self, node_id: str) -> SpotNode | None:
+        """Return the local view of a node, or None if it is not tracked."""
+        return self.scheduler._nodes.get(node_id)
+
+    async def mark_node_failed(self, node_id: str, reason: str) -> None:
+        """Mark a node FAILED so the reconcile loop will replace it.
+
+        Called by `RemoteWorkerSource` after a dispatch fails because
+        the node is unreachable / agent is dead. Does NOT terminate the
+        VM here — the reconcile loop owns terminate + replace so we
+        funnel all provider mutations through one place.
+        """
+        async with self._provider_lock:
+            node = self.scheduler._nodes.get(node_id)
+            if node is None:
+                return
+            failed = SpotNode(
+                node_id=node.node_id,
+                name=node.name,
+                state=SpotNodeState.FAILED,
+                public_ip=node.public_ip,
+                outbound_ip=node.outbound_ip,
+                inflight=0,
+                vm_size=node.vm_size,
+                zone=node.zone,
+                metadata=node.metadata,
+                error=reason,
+            )
+            self.scheduler._nodes[node_id] = failed
+            self.scheduler._assignments.pop(node_id, None)
+        self._metrics.failures_total += 1
+        self._record(
+            "node_failed_locally",
+            {"node_id": node_id, "reason": reason},
+        )
+
     # ----- snapshot / introspection ------------------------------------
 
     def snapshot(self) -> dict[str, Any]:
@@ -458,6 +509,7 @@ class SpotPoolManager:
                 "inflight": node.inflight,
                 "vm_size": node.vm_size,
                 "zone": node.zone,
+                "metadata": dict(node.metadata),
                 "error": node.error,
             }
             for node in self.scheduler._nodes.values()
@@ -478,6 +530,7 @@ class SpotPoolManager:
             "nodes": nodes,
             "counters": counters,
             "metrics": self._metrics_dict(),
+            "quota": self._last_quota_dict(),
             "recent_evictions": [
                 {
                     "node_id": e.node_id,
@@ -485,12 +538,24 @@ class SpotPoolManager:
                     "reason": e.reason,
                     "requeue_task_ids": list(e.requeue_task_ids),
                 }
-                for e in self._eviction_events[-20:]
+                for e in self._eviction_history[-20:]
             ],
             "recent_events": [
                 {"event_type": e.event_type, "timestamp": e.timestamp, "payload": e.payload}
                 for e in self._events[-20:]
             ],
+        }
+
+    def _last_quota_dict(self) -> dict[str, Any] | None:
+        quota = self._last_quota
+        if quota is None:
+            return None
+        return {
+            "used": quota.used,
+            "limit": quota.limit,
+            "spot_quota_observed": quota.spot_quota_observed,
+            "public_ip_quota_observed": quota.public_ip_quota_observed,
+            "is_sufficient": quota.is_sufficient,
         }
 
     def drain_eviction_events(self) -> list[EvictionEvent]:

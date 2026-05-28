@@ -1,4 +1,9 @@
-from rapid_evidence.spot.models import SpotNode, SpotNodeState, SpotPoolConfig
+from rapid_evidence.spot.models import (
+    QuotaSnapshot,
+    SpotNode,
+    SpotNodeState,
+    SpotPoolConfig,
+)
 
 
 class InMemorySpotVmProvider:
@@ -68,3 +73,14 @@ class InMemorySpotVmProvider:
     @property
     def nodes(self) -> dict[str, SpotNode]:
         return self._nodes
+
+    def check_quota(
+        self, requested_nodes: int, config: SpotPoolConfig
+    ) -> QuotaSnapshot:
+        return QuotaSnapshot(
+            used=len(self._nodes),
+            limit=config.max_nodes * 4,
+            spot_quota_observed=True,
+            public_ip_quota_observed=True,
+            is_sufficient=True,
+        )

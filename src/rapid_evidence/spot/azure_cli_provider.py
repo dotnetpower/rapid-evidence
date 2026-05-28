@@ -8,6 +8,11 @@ from dataclasses import dataclass, field
 from rapid_evidence.core.errors import ProviderError
 from rapid_evidence.spot.fake import InMemorySpotVmProvider
 from rapid_evidence.spot.models import QuotaSnapshot, SpotNode, SpotNodeState, SpotPoolConfig
+from rapid_evidence.worker.agent_script import (
+    AgentInstallSpec,
+    DEFAULT_AGENT_PORT,
+    generate_agent_secret,
+)
 
 
 @dataclass(frozen=True)
@@ -30,6 +35,9 @@ class AzureSpotVmConfig:
     cloud_init_enabled: bool = True
     vm_name_prefix: str = "rapid-evidence"
     subscription: str | None = None
+    agent_port: int = DEFAULT_AGENT_PORT
+    agent_shared_secret: str | None = None
+    agent_enabled: bool = True
 
     def __post_init__(self):
         if not self.location.strip():
@@ -58,7 +66,26 @@ class AzureCliSpotVmProvider(InMemorySpotVmProvider):
         self._cloud_init_path = None
         self._name_to_node_id = {}
         self._cleanup_registered = False
+        self._agent_shared_secret = (
+            config.agent_shared_secret
+            if config.agent_shared_secret
+            else generate_agent_secret()
+        )
         self._ensure_az_cli()
+
+    @property
+    def agent_shared_secret(self) -> str:
+        return self._agent_shared_secret
+
+    @property
+    def agent_port(self) -> int:
+        return self.config.agent_port
+
+    def _agent_install_spec(self) -> AgentInstallSpec:
+        return AgentInstallSpec(
+            port=self.config.agent_port,
+            shared_secret=self._agent_shared_secret,
+        )
 
     def _ensure_az_cli(self):
         if subprocess.run(["az", "version"], capture_output=True, text=True).returncode != 0:
@@ -128,6 +155,22 @@ while True:
     time.sleep(5)
 """
 
+        agent_block = ""
+        agent_runcmd: list[str] = []
+        if self.config.agent_enabled:
+            spec = self._agent_install_spec()
+            agent_block = spec.cloud_init_block(probe_urls=self.config.probe_urls)
+            agent_runcmd = spec.runcmd_block()
+
+        runcmd_lines = [
+            "mkdir -p /var/log/rapid-evidence",
+            "python3 /opt/rapid-evidence/outbound_probe.py || true",
+            "systemctl daemon-reload",
+            "systemctl enable --now rapid-evidence-eviction.service",
+            *agent_runcmd,
+        ]
+        runcmd_yaml = "\n".join(f"  - {line}" for line in runcmd_lines)
+
         return f"""#cloud-config
 write_files:
   - path: /opt/rapid-evidence/eviction_watcher.py
@@ -153,11 +196,8 @@ write_files:
 
       [Install]
       WantedBy=multi-user.target
-runcmd:
-  - mkdir -p /var/log/rapid-evidence
-  - python3 /opt/rapid-evidence/outbound_probe.py || true
-  - systemctl daemon-reload
-  - systemctl enable --now rapid-evidence-eviction.service
+{agent_block}runcmd:
+{runcmd_yaml}
 """.replace("{eviction_script}", eviction_script).replace("{probe_script}", probe_script)
 
     def _write_cloud_init(self) -> str:
@@ -198,6 +238,26 @@ runcmd:
             self._run_az(["network", "vnet", "subnet", "update", "--resource-group", self.config.resource_group, "--vnet-name", "rapid-evidence-vnet", "--name", "rapid-evidence-subnet", "--network-security-group", self.config.nsg_name, "--output", "none"])
         except ProviderError:
             pass
+        if self.config.agent_enabled:
+            try:
+                self._run_az([
+                    "network", "nsg", "rule", "create",
+                    "--resource-group", self.config.resource_group,
+                    "--nsg-name", self.config.nsg_name,
+                    "--name", "allow-agent-inbound",
+                    "--priority", "300",
+                    "--direction", "Inbound",
+                    "--access", "Allow",
+                    "--protocol", "Tcp",
+                    "--source-address-prefix", "Internet",
+                    "--source-port-range", "*",
+                    "--destination-address-prefix", "*",
+                    "--destination-port-range", str(self.config.agent_port),
+                    "--description", "rapid-evidence agent (bearer-auth)",
+                    "--output", "none",
+                ])
+            except ProviderError:
+                pass
 
     def _size_rotation(self):
         sizes = [self.config.vm_size, *self.config.vm_size_fallbacks]

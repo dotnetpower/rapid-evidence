@@ -35,6 +35,7 @@ def client(monkeypatch):
     sink = InMemorySink()
     monkeypatch.setattr(api, "default_source_client_factory", lambda src: fake_source)
     monkeypatch.setattr(api, "default_result_sink", lambda: sink)
+    monkeypatch.setenv("RAPID_EVIDENCE_REMOTE_DISPATCH", "false")
     monkeypatch.setenv("RAPID_EVIDENCE_SPOT_PROVIDER", "in-memory")
     monkeypatch.setenv("RAPID_EVIDENCE_SPOT_MIN_READY", "1")
     monkeypatch.setenv("RAPID_EVIDENCE_SPOT_MAX_NODES", "4")

@@ -149,3 +149,38 @@ async def test_submit_rejects_empty_targets():
         await registry.submit(source="generic-http", targets=[])
     with pytest.raises(ValueError):
         await registry.submit(source="generic-http", targets=["   "])
+
+
+@pytest.mark.asyncio
+async def test_notify_eviction_updates_batch_evictions_observed():
+    """Eviction events routed via notify_eviction bump the affected batch's counter
+    and are reflected in BatchProgress.metadata['evictions_observed'].
+    """
+    source = FakeSource(delay=0.05)
+    sink = InMemorySink()
+    registry = _make_registry(source, sink, default_workers=1)
+
+    record = await registry.submit(
+        source="generic-http",
+        targets=[f"https://example.com/{i}" for i in range(3)],
+    )
+    request_ids = [req.request_id for req in record.requests]
+
+    affected = registry.notify_eviction(
+        requeue_task_ids=(request_ids[0], request_ids[2]),
+        reason="evicted",
+    )
+    assert affected == {record.batch_id: 2}
+    assert record.evictions_observed == 2
+
+    progress = registry.progress(record.batch_id)
+    assert progress is not None
+    assert progress.metadata.get("evictions_observed") == 2
+
+    # Unknown request IDs are silently ignored (no exception, no entry).
+    affected_again = registry.notify_eviction(
+        requeue_task_ids=("req-unknown-xyz",), reason="failed"
+    )
+    assert affected_again == {}
+
+    await record._task

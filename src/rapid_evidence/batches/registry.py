@@ -15,6 +15,7 @@ batch executor is the unit of work the UI reasons about.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import time
 from collections import deque
@@ -31,6 +32,10 @@ logger = logging.getLogger(__name__)
 
 # Rolling window (seconds) used to derive batch throughput and ETA.
 _THROUGHPUT_WINDOW_SECONDS = 60.0
+
+# Max history events kept per BatchRecord (FIFO). The detail-page timeline
+# fetches the whole list, so cap it to bound memory regardless of batch size.
+_HISTORY_MAX_EVENTS = 256
 
 
 class BatchStatus(str, Enum):
@@ -117,6 +122,18 @@ class BatchRecord:
     started_at: str | None = None
     finished_at: str | None = None
     error: str | None = None
+    # Count of in-flight requests requeued after a spot-node eviction,
+    # observed via SpotPoolManager.drain_eviction_events. Surfaced in
+    # BatchProgress.metadata["evictions_observed"] so the UI can flag
+    # batches that hit instability.
+    evictions_observed: int = 0
+    # Per-node dispatch counts (node_id -> count of successful fetches),
+    # surfaced in BatchProgress.metadata["node_counts"] so the UI can
+    # show which Spot VM handled how many requests.
+    node_counts: dict[str, int] = field(default_factory=dict)
+    # Append-only event log surfaced via GET /batches/{id}/timeline.
+    # Capped FIFO; oldest events drop when over the limit.
+    history: list[dict[str, Any]] = field(default_factory=list)
     # Monotonic timestamps of completed-or-failed requests, for throughput.
     _completion_log: deque[float] = field(default_factory=deque, repr=False)
     _task: asyncio.Task[None] | None = field(default=None, repr=False)
@@ -140,6 +157,18 @@ class BatchRecord:
         while self._completion_log and self._completion_log[0] < cutoff:
             self._completion_log.popleft()
 
+    def record_event(self, event_type: str, payload: dict[str, Any] | None = None) -> None:
+        self.history.append(
+            {
+                "timestamp": utc_now_iso(),
+                "event_type": event_type,
+                "payload": dict(payload or {}),
+            }
+        )
+        overflow = len(self.history) - _HISTORY_MAX_EVENTS
+        if overflow > 0:
+            del self.history[:overflow]
+
     def throughput_per_second(self) -> float:
         now = time.monotonic()
         self._trim_completion_log(now)
@@ -159,6 +188,11 @@ class BatchRecord:
         return pending / rate
 
     def progress(self) -> BatchProgress:
+        meta = dict(self.metadata)
+        if self.evictions_observed:
+            meta["evictions_observed"] = self.evictions_observed
+        if self.node_counts:
+            meta["node_counts"] = dict(self.node_counts)
         return BatchProgress(
             batch_id=self.batch_id,
             source=self.source,
@@ -174,7 +208,7 @@ class BatchRecord:
             started_at=self.started_at,
             finished_at=self.finished_at,
             error=self.error,
-            metadata=dict(self.metadata),
+            metadata=meta,
         )
 
 
@@ -197,6 +231,10 @@ class BatchExecutor:
     async def run(self, record: BatchRecord) -> None:
         record.status = BatchStatus.RUNNING
         record.started_at = utc_now_iso()
+        record.record_event(
+            "started",
+            {"workers_target": record.workers_target, "total": record.total},
+        )
         sem = asyncio.Semaphore(max(1, record.workers_target))
         active_lock = asyncio.Lock()
 
@@ -228,22 +266,43 @@ class BatchExecutor:
                 record.status = BatchStatus.FAILED
             else:
                 record.status = BatchStatus.DONE
+            record.record_event(
+                "finished",
+                {
+                    "status": record.status.value,
+                    "completed": record.completed,
+                    "failed": record.failed,
+                },
+            )
 
     async def _process_one(self, record: BatchRecord, req: FetchRequest) -> None:
         try:
             fetched = await asyncio.wait_for(
-                asyncio.to_thread(self.source_client.fetch, req.target, req.headers),
+                self._invoke_source(req),
                 timeout=self.request_timeout_seconds,
             )
             body = fetched.get("body", b"") if isinstance(fetched, dict) else b""
             status_code = fetched.get("status") if isinstance(fetched, dict) else None
+            metrics: dict[str, Any] = {
+                "bytes": len(body) if isinstance(body, (bytes, bytearray)) else 0,
+                "status_code": status_code,
+            }
+            if isinstance(fetched, dict):
+                for key in ("outbound_ip", "node_id", "attempts"):
+                    if fetched.get(key) is not None:
+                        metrics[key] = fetched[key]
+                node_id = fetched.get("node_id")
+                if isinstance(node_id, str) and node_id:
+                    record.node_counts[node_id] = (
+                        record.node_counts.get(node_id, 0) + 1
+                    )
             result = FetchResult(
                 request_id=req.request_id,
                 source=req.source,
                 target=req.target,
                 status=RequestStatus.SUCCEEDED,
-                body=body,
-                metrics={"bytes": len(body), "status_code": status_code},
+                body=body if isinstance(body, (bytes, bytearray)) else b"",
+                metrics=metrics,
             )
             await asyncio.to_thread(self.sink.write, result)
             record.record_completion(success=True)
@@ -262,6 +321,27 @@ class BatchExecutor:
             except Exception as sink_exc:  # noqa: BLE001
                 logger.warning("sink rejected failure result: %s", sink_exc)
             record.record_completion(success=False)
+
+    async def _invoke_source(self, req: FetchRequest):
+        """Dispatch a single fetch via whichever source flavour we have.
+
+        Async sources expose `fetch_async(url, headers, *, request_id=)`
+        (preferred — RemoteWorkerSource) OR a coroutine `fetch(url,
+        headers)`. Sync sources expose a plain `fetch(url, headers)` and
+        are dispatched via a worker thread.
+        """
+        async_fetch = getattr(self.source_client, "fetch_async", None)
+        if async_fetch is not None and inspect.iscoroutinefunction(async_fetch):
+            try:
+                return await async_fetch(
+                    req.target, req.headers, request_id=req.request_id
+                )
+            except TypeError:
+                return await async_fetch(req.target, req.headers)
+        fetch = self.source_client.fetch
+        if inspect.iscoroutinefunction(fetch):
+            return await fetch(req.target, req.headers)
+        return await asyncio.to_thread(fetch, req.target, req.headers)
 
 
 class BatchRegistry:
@@ -284,6 +364,9 @@ class BatchRegistry:
         self.executor_factory = executor_factory
         self.default_workers = default_workers
         self._records: dict[str, BatchRecord] = {}
+        # request_id -> batch_id; lets `notify_eviction` route requeue
+        # hints from the SpotPoolManager to the right BatchRecord.
+        self._request_index: dict[str, str] = {}
         # Tracks the most recent N completions across ALL batches, for
         # aggregate throughput reporting on the dashboard.
         self._global_completions: deque[float] = deque(maxlen=10000)
@@ -318,8 +401,14 @@ class BatchRegistry:
             workers_target=max(1, workers or self.default_workers),
             metadata=dict(metadata or {}),
         )
+        record.record_event(
+            "queued",
+            {"source": normalized_source, "total": len(requests)},
+        )
         async with self._lock:
             self._records[record.batch_id] = record
+            for req in record.requests:
+                self._request_index[req.request_id] = record.batch_id
         record._task = asyncio.create_task(
             self._run_and_track(record), name=f"batch-{record.batch_id}"
         )
@@ -361,10 +450,48 @@ class BatchRegistry:
         )
         return [r.progress() for r in records]
 
+    def notify_eviction(
+        self, *, requeue_task_ids: tuple[str, ...] | list[str], reason: str
+    ) -> dict[str, int]:
+        """Record a spot-node eviction touching the given request IDs.
+
+        The RemoteWorkerSource retries the actual fetch on a different
+        node, so this is informational: it bumps each affected batch's
+        `evictions_observed` counter so the UI can flag instability.
+        Returns a `{batch_id: count}` map of which batches were affected.
+        """
+        affected: dict[str, int] = {}
+        per_batch_requests: dict[str, list[str]] = {}
+        for request_id in requeue_task_ids:
+            batch_id = self._request_index.get(request_id)
+            if not batch_id:
+                continue
+            record = self._records.get(batch_id)
+            if record is None:
+                continue
+            record.evictions_observed += 1
+            affected[batch_id] = affected.get(batch_id, 0) + 1
+            per_batch_requests.setdefault(batch_id, []).append(request_id)
+        for batch_id, request_ids in per_batch_requests.items():
+            record = self._records[batch_id]
+            record.record_event(
+                "evicted",
+                {"reason": reason, "request_ids": list(request_ids)},
+            )
+        if affected:
+            logger.info(
+                "eviction (%s) requeued %d request(s) across %d batch(es)",
+                reason,
+                sum(affected.values()),
+                len(affected),
+            )
+        return affected
+
     async def cancel(self, batch_id: str) -> BatchProgress | None:
         record = self._records.get(batch_id)
         if record is None:
             return None
+        record.record_event("cancel_requested", {})
         record._cancel_event.set()
         if record._task is not None and not record._task.done():
             record._task.cancel()

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../lib/api";
+import { useI18n } from "../lib/i18n";
 
 interface NewBatchDialogProps {
   open: boolean;
@@ -23,6 +24,7 @@ export function NewBatchDialog({ open, onClose }: NewBatchDialogProps) {
   const [targetsText, setTargetsText] = useState("");
   const [workers, setWorkers] = useState("4");
   const queryClient = useQueryClient();
+  const { t } = useI18n();
 
   const create = useMutation({
     mutationFn: () =>
@@ -46,10 +48,10 @@ export function NewBatchDialog({ open, onClose }: NewBatchDialogProps) {
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal" role="dialog" aria-label="새 배치 등록">
+      <div className="modal" role="dialog" aria-label={t("dialog.title")}>
         <header>
-          <h2>새 배치 등록</h2>
-          <button className="icon-btn" onClick={onClose} aria-label="닫기">✕</button>
+          <h2>{t("dialog.title")}</h2>
+          <button className="icon-btn" onClick={onClose} aria-label={t("dialog.close")}>✕</button>
         </header>
         <div className="body">
           {error && <div className="error-banner">{error}</div>}
@@ -60,20 +62,20 @@ export function NewBatchDialog({ open, onClose }: NewBatchDialogProps) {
               value={source}
               onChange={(e) => setSource(e.target.value)}
             />
-            <span className="hint">정책에 등록된 소스 이름 (기본 generic-http)</span>
+            <span className="hint">{t("dialog.source.hint")}</span>
           </div>
           <div className="field">
-            <label htmlFor="targets">targets · {targetCount}개</label>
+            <label htmlFor="targets">{t("dialog.targets.label", { n: targetCount })}</label>
             <textarea
               id="targets"
               placeholder={PLACEHOLDER}
               value={targetsText}
               onChange={(e) => setTargetsText(e.target.value)}
             />
-            <span className="hint">개행, 쉼표, 세미콜론으로 구분</span>
+            <span className="hint">{t("dialog.targets.hint")}</span>
           </div>
           <div className="field">
-            <label htmlFor="workers">workers</label>
+            <label htmlFor="workers">{t("dialog.workers")}</label>
             <input
               id="workers"
               type="number"
@@ -84,13 +86,13 @@ export function NewBatchDialog({ open, onClose }: NewBatchDialogProps) {
           </div>
         </div>
         <footer>
-          <button className="btn" onClick={onClose}>취소</button>
+          <button className="btn" onClick={onClose}>{t("dialog.cancel")}</button>
           <button
             className="btn primary"
             disabled={targetCount === 0 || create.isPending}
             onClick={() => create.mutate()}
           >
-            {create.isPending ? "등록 중…" : `＋ 등록 (${targetCount})`}
+            {create.isPending ? t("dialog.submitting") : t("dialog.submit", { n: targetCount })}
           </button>
         </footer>
       </div>

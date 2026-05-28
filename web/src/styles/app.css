@@ -143,6 +143,19 @@
 }
 .btn.primary:hover { background: #1186e0; }
 
+.lang-toggle .lang-btn {
+  padding: 2px 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  border-radius: var(--radius-sm);
+  min-width: 28px;
+}
+.lang-toggle .lang-btn.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
 .kpis {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

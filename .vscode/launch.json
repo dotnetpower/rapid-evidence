@@ -1,0 +1,116 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "FastAPI: rapid-evidence (dev, reload)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": [
+        "rapid_evidence.api:app",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8800",
+        "--reload",
+        "--reload-dir",
+        "${workspaceFolder}/src"
+      ],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src",
+        "RAPID_EVIDENCE_SPOT_PROVIDER": "in-memory"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "subProcess": true
+    },
+    {
+      "name": "FastAPI: rapid-evidence (debug)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": [
+        "rapid_evidence.api:app",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8800"
+      ],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src",
+        "RAPID_EVIDENCE_SPOT_PROVIDER": "in-memory"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "subProcess": true
+    },
+    {
+      "name": "CLI: rapidfetch run-local",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "rapid_evidence.cli",
+      "args": [
+        "run-local",
+        "--url",
+        "https://example.com",
+        "--output-dir",
+        "${workspaceFolder}/.rapid-evidence"
+      ],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Pytest: current file",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["${file}", "-vv"],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Web: Vite dev server",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--", "--port", "5175", "--strictPort"],
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "name": "Web: Chrome (attach to Vite)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:5175",
+      "webRoot": "${workspaceFolder}/web",
+      "sourceMaps": true
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Full stack: API + Web",
+      "configurations": ["FastAPI: rapid-evidence (dev, reload)", "Web: Vite dev server"],
+      "stopAll": true
+    },
+    {
+      "name": "Full stack: API (debug) + Web",
+      "configurations": ["FastAPI: rapid-evidence (debug)", "Web: Vite dev server"],
+      "stopAll": true
+    }
+  ]
+}

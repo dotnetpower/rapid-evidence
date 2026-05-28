@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type BatchProgress, type BatchStatus } from "../lib/api";
 import { formatDuration, formatNumber, formatPercent, formatRate } from "../lib/format";
+import { useI18n } from "../lib/i18n";
 
 const TERMINAL_STATES: BatchStatus[] = ["done", "cancelled", "failed"];
 
@@ -17,6 +18,7 @@ function meterColor(status: BatchStatus): string {
 
 export function BatchesTable() {
   const queryClient = useQueryClient();
+  const { t } = useI18n();
   const batches = useQuery({
     queryKey: ["batches"],
     queryFn: () => api.listBatches().then((r) => r.batches),
@@ -34,35 +36,63 @@ export function BatchesTable() {
   return (
     <section className="panel">
       <div className="panel-head">
-        <span className="title">배치 큐 · {rows.length}개</span>
-        <span className="meta">갱신 2초 · 정렬: 최근 생성</span>
+        <span className="title">{t("batches.title", { n: rows.length })}</span>
+        <span className="meta">{t("batches.meta")}</span>
       </div>
       {rows.length === 0 ? (
         <div className="empty">
           {batches.isLoading
-            ? "로드 중…"
-            : "등록된 배치가 없습니다. 우측 상단 “＋ 새 배치”로 추가하세요."}
+            ? t("batches.empty.loading")
+            : t("batches.empty.none")}
         </div>
       ) : (
         <table className="batches">
           <thead>
             <tr>
-              <th style={{ width: "28%" }}>배치</th>
-              <th style={{ width: 80 }}>요청 수</th>
-              <th>진행</th>
-              <th style={{ width: 90 }}>처리율</th>
-              <th style={{ width: 100 }}>ETA</th>
-              <th style={{ width: 70 }}>workers</th>
-              <th style={{ width: 90 }}>상태</th>
-              <th style={{ width: 90, textAlign: "right" }}>조작</th>
+              <th style={{ width: "28%" }}>{t("batches.col.batch")}</th>
+              <th style={{ width: 80 }}>{t("batches.col.requests")}</th>
+              <th>{t("batches.col.progress")}</th>
+              <th style={{ width: 90 }}>{t("batches.col.rate")}</th>
+              <th style={{ width: 100 }}>{t("batches.col.eta")}</th>
+              <th style={{ width: 70 }}>{t("batches.col.workers")}</th>
+              <th style={{ width: 90 }}>{t("batches.col.status")}</th>
+              <th style={{ width: 90, textAlign: "right" }}>{t("batches.col.actions")}</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((b) => (
+            {rows.map((b) => {
+              const evObs = Number(
+                (b.metadata && (b.metadata as Record<string, unknown>).evictions_observed) ?? 0
+              );
+              const nodeCounts = (b.metadata?.node_counts ?? {}) as Record<string, number>;
+              const nodeIds = Object.keys(nodeCounts);
+              return (
               <tr key={b.batch_id}>
                 <td className="name id-cell">
                   <div className="id">{b.batch_id}</div>
-                  <div className="src">{b.source}</div>
+                  <div className="src">
+                    {b.source}
+                    {evObs > 0 && (
+                      <span
+                        title={t("batches.evictTooltip", { n: evObs })}
+                        style={{ marginLeft: 6, color: "#e6c47a" }}
+                      >
+                        ⚠ {evObs}
+                      </span>
+                    )}
+                    {nodeIds.length > 0 && (
+                      <span
+                        title={nodeIds
+                          .map((id) => `${id}: ${nodeCounts[id]}`)
+                          .join("\n")}
+                        style={{ marginLeft: 6, opacity: 0.6 }}
+                      >
+                        · {t(nodeIds.length === 1 ? "batches.nodes" : "batches.nodes_plural", {
+                          n: nodeIds.length,
+                        })}
+                      </span>
+                    )}
+                  </div>
                 </td>
                 <td>{formatNumber(b.total)}</td>
                 <td>
@@ -76,11 +106,11 @@ export function BatchesTable() {
                 <td>{formatRate(b.throughput_per_second)}</td>
                 <td>
                   {b.status === "done"
-                    ? "완료"
+                    ? t("batches.status.done")
                     : b.status === "cancelled"
-                    ? "취소됨"
+                    ? t("batches.status.cancelled")
                     : b.status === "failed"
-                    ? "실패"
+                    ? t("batches.status.failed")
                     : formatDuration(b.eta_seconds)}
                 </td>
                 <td>
@@ -94,13 +124,14 @@ export function BatchesTable() {
                     className="icon-btn"
                     onClick={() => cancelMut.mutate(b.batch_id)}
                     disabled={TERMINAL_STATES.includes(b.status) || cancelMut.isPending}
-                    title="취소"
+                    title={t("batches.cancel")}
                   >
                     ✕
                   </button>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       )}

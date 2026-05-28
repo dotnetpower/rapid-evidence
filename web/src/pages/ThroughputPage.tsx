@@ -8,10 +8,12 @@ import { BatchesTable } from "../components/BatchesTable";
 import { NewBatchDialog } from "../components/NewBatchDialog";
 import type { DashboardSummary } from "../lib/api";
 import { formatDuration, formatNumber, formatRate } from "../lib/format";
+import { useI18n } from "../lib/i18n";
 
 export function ThroughputPage() {
   const summary = useOutletContext<UseQueryResult<DashboardSummary>>();
   const [dialogOpen, setDialogOpen] = useState(false);
+  const { t } = useI18n();
 
   const data = summary.data;
   const counters = data?.pool?.counters ?? {};
@@ -30,10 +32,8 @@ export function ThroughputPage() {
     <>
       <div className="page-head">
         <div>
-          <h1>처리량 (Throughput)</h1>
-          <div className="sub">
-            백로그 · 풀 확장 속도 · 처리율을 한 화면에서 추적
-          </div>
+          <h1>{t("page.throughput.title")}</h1>
+          <div className="sub">{t("page.throughput.sub")}</div>
         </div>
         <div className="actions">
           <button
@@ -41,57 +41,71 @@ export function ThroughputPage() {
             onClick={() => summary.refetch()}
             disabled={summary.isFetching}
           >
-            ⟳ 새로고침
+            ⟳ {t("page.refresh")}
           </button>
           <button className="btn primary" onClick={() => setDialogOpen(true)}>
-            ＋ 새 배치
+            ＋ {t("page.newBatch")}
           </button>
         </div>
       </div>
 
-      {summary.isError && (
+      {summary.isError && summary.dataUpdatedAt > 0 && (
         <div className="error-banner" style={{ marginBottom: 16 }}>
-          API 연결 실패 — 백엔드 (uvicorn) 가 떠 있는지 확인하세요.
+          {t("page.err.apiDown")}
+        </div>
+      )}
+      {summary.isError && summary.dataUpdatedAt === 0 && (
+        <div
+          className="error-banner"
+          style={{ marginBottom: 16, background: "#3a2f1a", borderColor: "#7a5d20", color: "#e6c47a" }}
+        >
+          {t("page.err.apiBoot")}
         </div>
       )}
 
       <div className="kpis">
         <KpiCard
-          label="backlog (pending requests)"
+          label={t("kpi.backlog.label")}
           value={formatNumber(data?.backlog ?? 0)}
-          unit="req"
+          unit={t("kpi.backlog.unit")}
+          detail={data ? t("kpi.backlog.activeBatches", { n: data.active_batches }) : "—"}
+        />
+        <KpiCard
+          label={t("kpi.tp.label")}
+          value={data ? data.throughput_per_second.toFixed(data.throughput_per_second >= 10 ? 0 : 1) : "—"}
+          unit={t("kpi.tp.unit")}
           detail={
-            data
-              ? `${data.active_batches} 활성 배치`
+            data?.latest_sample
+              ? t("kpi.tp.activeSamples", { n: data.latest_sample.active_batches })
               : "—"
           }
         />
         <KpiCard
-          label="throughput (1 min)"
-          value={data ? data.throughput_per_second.toFixed(data.throughput_per_second >= 10 ? 0 : 1) : "—"}
-          unit="req/s"
-          detail={data?.latest_sample ? `샘플 ${data.latest_sample.active_batches}건 활성` : "—"}
-        />
-        <KpiCard
-          label="drain ETA (현재 속도)"
+          label={t("kpi.drain.label")}
           value={formatDuration(data?.drain_eta_seconds ?? null)}
           detail={
             data?.drain_eta_seconds == null && (data?.backlog ?? 0) > 0
-              ? "처리율 0 — 워커 부족"
+              ? t("kpi.drain.starved")
               : data?.drain_eta_seconds === 0
-              ? "백로그 비어있음"
-              : `처리율 ${formatRate(data?.throughput_per_second)}`
+              ? t("kpi.drain.empty")
+              : t("kpi.drain.rate", { rate: formatRate(data?.throughput_per_second) })
           }
           tone={data?.drain_eta_seconds == null && (data?.backlog ?? 0) > 0 ? "warn" : "neutral"}
         />
         <KpiCard
-          label="spot vm (active / target / max)"
+          label={t("kpi.spot.label")}
           value={activeVms}
           unit={`/ ${target || "—"} / ${maxNodes || "—"}`}
           detail={
             data?.pool?.running
-              ? `ready ${counters.ready ?? 0} · running ${counters.busy ?? 0} · prov ${counters.provisioning ?? 0}`
-              : "pool autostart disabled"
+              ? t("kpi.spot.detail", {
+                  ready: counters.ready ?? 0,
+                  running: counters.busy ?? 0,
+                  prov: counters.provisioning ?? 0,
+                })
+              : data?.pool
+              ? t("kpi.spot.autostartOff")
+              : "—"
           }
           tone={Number(counters.provisioning ?? 0) > 0 ? "warn" : "neutral"}
         />
