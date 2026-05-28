@@ -83,7 +83,7 @@ Conventions
 
 | File | LOC | Responsibility |
 | ---- | --: | -------------- |
-| [src/rapid_evidence/batches/registry.py](../src/rapid_evidence/batches/registry.py) | 507 | **OVER LIMIT.** Contains `BatchStatus`, `SourceClient` Protocol, `ResultSink` Protocol, `BatchProgress`, `BatchRecord`, `BatchExecutor`, `BatchRegistry`. Split candidates: `batches/models.py` (status + dataclasses), `batches/executor.py` (`BatchExecutor`), `batches/registry.py` (registry only), `batches/protocols.py` (Protocols). |
+| [src/rapid_evidence/batches/registry.py](../src/rapid_evidence/batches/registry.py) | 563 | **OVER LIMIT.** Contains `BatchStatus`, `SourceClient` Protocol, `ResultSink` Protocol, `BatchProgress`, `BatchRecord` (now with `history: list[dict]` FIFO-capped at 256 + `evicted_request_ids`), `BatchExecutor`, `BatchRegistry`. Records lifecycle events (`queued`/`started`/`finished`/`cancel_requested`/`evicted`) into `record.history` for the batches detail-page timeline. Split candidates: `batches/models.py` (status + dataclasses), `batches/executor.py` (`BatchExecutor`), `batches/registry.py` (registry only), `batches/protocols.py` (Protocols). |
 
 ## spot/ — Azure Spot VM pool
 
@@ -144,9 +144,14 @@ Gaps to close on next test refactor:
 | [web/src/components/KpiCard.tsx](../web/src/components/KpiCard.tsx) | KPI card. |
 | [web/src/components/PoolPanel.tsx](../web/src/components/PoolPanel.tsx) | Spot pool panel — counters, Spot Nodes table, Recent Evictions list. |
 | [web/src/components/BatchesTable.tsx](../web/src/components/BatchesTable.tsx) | Batches table — per-batch node count + eviction glyph. |
+| [web/src/components/batches/BatchFilterBar.tsx](../web/src/components/batches/BatchFilterBar.tsx) | Filter (all/active/terminal) + sort (newest/rate/evictions) bar for `/batches`. |
+| [web/src/components/batches/BatchListTable.tsx](../web/src/components/batches/BatchListTable.tsx) | Full-page batches table (selectable rows, deep-link to drawer). |
+| [web/src/components/batches/BatchDetailDrawer.tsx](../web/src/components/batches/BatchDetailDrawer.tsx) | Right-slide drawer: summary KPIs, per-node dispatch, eviction impact, timeline, cancel. |
+| [web/src/components/batches/BatchTimelineList.tsx](../web/src/components/batches/BatchTimelineList.tsx) | Reverse-chrono timeline list (consumes `GET /batches/{id}/timeline`). |
 | [web/src/components/NewBatchDialog.tsx](../web/src/components/NewBatchDialog.tsx) | New batch dialog. |
 | [web/src/components/ThroughputChart.tsx](../web/src/components/ThroughputChart.tsx) | Throughput chart. |
 | [web/src/pages/ThroughputPage.tsx](../web/src/pages/ThroughputPage.tsx) | Throughput page route. |
+| [web/src/pages/BatchesPage.tsx](../web/src/pages/BatchesPage.tsx) | Batches page route — filter/sort bar, full table, URL-driven `/batches/:batchId` detail drawer. |
 | [web/src/test/setup.ts](../web/src/test/setup.ts) | Vitest setup hook. |
 | [web/src/__tests__/format.test.ts](../web/src/__tests__/format.test.ts) | Vitest suite for `lib/format`. |
 

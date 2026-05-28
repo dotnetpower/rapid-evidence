@@ -131,6 +131,10 @@ class BatchRecord:
     # surfaced in BatchProgress.metadata["node_counts"] so the UI can
     # show which Spot VM handled how many requests.
     node_counts: dict[str, int] = field(default_factory=dict)
+    # Request IDs that were requeued at least once due to eviction;
+    # surfaced via BatchProgress.metadata["evicted_request_ids"]. Capped
+    # at the same FIFO limit as `history` to bound memory on long batches.
+    evicted_request_ids: list[str] = field(default_factory=list)
     # Append-only event log surfaced via GET /batches/{id}/timeline.
     # Capped FIFO; oldest events drop when over the limit.
     history: list[dict[str, Any]] = field(default_factory=list)
@@ -193,6 +197,8 @@ class BatchRecord:
             meta["evictions_observed"] = self.evictions_observed
         if self.node_counts:
             meta["node_counts"] = dict(self.node_counts)
+        if self.evicted_request_ids:
+            meta["evicted_request_ids"] = list(self.evicted_request_ids)
         return BatchProgress(
             batch_id=self.batch_id,
             source=self.source,
@@ -478,6 +484,12 @@ class BatchRegistry:
                 "evicted",
                 {"reason": reason, "request_ids": list(request_ids)},
             )
+            for rid in request_ids:
+                if rid not in record.evicted_request_ids:
+                    record.evicted_request_ids.append(rid)
+            overflow = len(record.evicted_request_ids) - _HISTORY_MAX_EVENTS
+            if overflow > 0:
+                del record.evicted_request_ids[:overflow]
         if affected:
             logger.info(
                 "eviction (%s) requeued %d request(s) across %d batch(es)",
