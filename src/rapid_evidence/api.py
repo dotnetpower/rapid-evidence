@@ -94,11 +94,13 @@ def build_pool_manager() -> SpotPoolManager:
     config = _build_pool_config()
     provider = _build_provider()
     scheduler = SpotVmScheduler(provider=provider, config=config)
+    quota_refresh = _env_float("RAPID_EVIDENCE_QUOTA_REFRESH_SECONDS", 60.0)
     return SpotPoolManager(
         scheduler=scheduler,
         heartbeat_interval=_env_float("RAPID_EVIDENCE_HEARTBEAT_SECONDS", 15.0),
         reconcile_interval=_env_float("RAPID_EVIDENCE_RECONCILE_SECONDS", 30.0),
         event_buffer=_env_int("RAPID_EVIDENCE_EVENT_BUFFER", 200),
+        quota_refresh_interval_seconds=quota_refresh if quota_refresh > 0 else None,
     )
 
 

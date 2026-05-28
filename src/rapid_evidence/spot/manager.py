@@ -97,6 +97,7 @@ class SpotPoolManager:
         event_buffer: int = 200,
         audit_sink=None,
         provider_lock: asyncio.Lock | None = None,
+        quota_refresh_interval_seconds: float | None = 60.0,
     ) -> None:
         if heartbeat_interval <= 0:
             raise ValueError("heartbeat_interval must be positive")
@@ -104,9 +105,12 @@ class SpotPoolManager:
             raise ValueError("reconcile_interval must be positive")
         if event_buffer <= 0:
             raise ValueError("event_buffer must be positive")
+        if quota_refresh_interval_seconds is not None and quota_refresh_interval_seconds <= 0:
+            raise ValueError("quota_refresh_interval_seconds must be positive or None")
         self.scheduler = scheduler
         self.heartbeat_interval = heartbeat_interval
         self.reconcile_interval = reconcile_interval
+        self.quota_refresh_interval_seconds = quota_refresh_interval_seconds
         self.audit_sink = audit_sink
         self._event_buffer = event_buffer
         self._events: list[PoolEvent] = []
@@ -116,12 +120,16 @@ class SpotPoolManager:
         # `snapshot()` can still surface recent evictions even when a
         # background drain task is consuming `_eviction_events`.
         self._eviction_history: list[EvictionEvent] = []
-        # Last observed provider quota, populated by future quota probe.
-        # Surfaced via snapshot()["quota"] for the dashboard /quota page.
+        # Last observed provider quota, populated by the quota refresh
+        # loop. Surfaced via snapshot()["quota"] for the dashboard
+        # /quota page.
         self._last_quota: QuotaSnapshot | None = None
+        self._last_quota_checked_at: str | None = None
+        self._last_quota_error: str | None = None
         self._running = False
         self._heartbeat_task: asyncio.Task[None] | None = None
         self._reconcile_task: asyncio.Task[None] | None = None
+        self._quota_refresh_task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
         # Serialises provider mutations (create/terminate/refresh) so that
         # heartbeat, reconcile, and scale_for never race on the underlying
@@ -147,6 +155,13 @@ class SpotPoolManager:
                 self._reconcile_task = asyncio.create_task(
                     self._reconcile_loop(), name="rapid-evidence-spot-reconcile"
                 )
+                if self.quota_refresh_interval_seconds is not None and hasattr(
+                    self.scheduler.provider, "check_quota"
+                ):
+                    self._quota_refresh_task = asyncio.create_task(
+                        self._quota_refresh_loop(),
+                        name="rapid-evidence-spot-quota-refresh",
+                    )
             self._record(
                 "pool_started",
                 {
@@ -165,7 +180,7 @@ class SpotPoolManager:
             if not self._running:
                 return
             self._running = False
-            tasks = [t for t in (self._heartbeat_task, self._reconcile_task) if t is not None]
+            tasks = [t for t in (self._heartbeat_task, self._reconcile_task, self._quota_refresh_task) if t is not None]
             for task in tasks:
                 task.cancel()
             for task in tasks:
@@ -176,6 +191,7 @@ class SpotPoolManager:
                         logger.warning("background task ended with error: %s", exc)
             self._heartbeat_task = None
             self._reconcile_task = None
+            self._quota_refresh_task = None
             try:
                 async with self._provider_lock:
                     terminated_count = len(
@@ -234,6 +250,49 @@ class SpotPoolManager:
                 await asyncio.sleep(self.reconcile_interval)
             except asyncio.CancelledError:
                 raise
+
+    async def _quota_refresh_loop(self) -> None:
+        # First probe runs immediately so the dashboard has a value before
+        # the first interval elapses.
+        while self._running:
+            try:
+                await self.refresh_quota_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                self._last_quota_error = str(exc)
+                self._record("quota_refresh_failed", {"error": str(exc)})
+            try:
+                await asyncio.sleep(self.quota_refresh_interval_seconds or 60.0)
+            except asyncio.CancelledError:
+                raise
+
+    async def refresh_quota_once(self) -> QuotaSnapshot | None:
+        provider = self.scheduler.provider
+        check_quota = getattr(provider, "check_quota", None)
+        if check_quota is None:
+            return None
+        requested = self.scheduler.config.max_nodes
+        try:
+            quota = await asyncio.to_thread(check_quota, requested, self.scheduler.config)
+        except Exception as exc:  # noqa: BLE001
+            self._last_quota_error = str(exc)
+            self._last_quota_checked_at = utc_now_iso()
+            self._record("quota_refresh_failed", {"error": str(exc)})
+            return None
+        self._last_quota = quota
+        self._last_quota_error = None
+        self._last_quota_checked_at = utc_now_iso()
+        self._record(
+            "quota_refreshed",
+            {
+                "used": quota.used,
+                "limit": quota.limit,
+                "is_sufficient": quota.is_sufficient,
+                "spot_quota_observed": quota.spot_quota_observed,
+            },
+        )
+        return quota
 
     async def heartbeat_once(self) -> list[EvictionEvent]:
         """Refresh provider view and merge with locally tracked work.
@@ -549,13 +608,20 @@ class SpotPoolManager:
     def _last_quota_dict(self) -> dict[str, Any] | None:
         quota = self._last_quota
         if quota is None:
-            return None
+            if self._last_quota_checked_at is None and self._last_quota_error is None:
+                return None
+            return {
+                "checked_at": self._last_quota_checked_at,
+                "error": self._last_quota_error,
+            }
         return {
             "used": quota.used,
             "limit": quota.limit,
             "spot_quota_observed": quota.spot_quota_observed,
             "public_ip_quota_observed": quota.public_ip_quota_observed,
             "is_sufficient": quota.is_sufficient,
+            "checked_at": self._last_quota_checked_at,
+            "error": self._last_quota_error,
         }
 
     def drain_eviction_events(self) -> list[EvictionEvent]:
