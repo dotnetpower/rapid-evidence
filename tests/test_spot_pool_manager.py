@@ -231,3 +231,91 @@ def test_manager_rejects_invalid_event_buffer():
     )
     with pytest.raises(ValueError):
         SpotPoolManager(scheduler=scheduler, event_buffer=0)
+
+
+def test_refresh_quota_once_populates_snapshot_quota():
+    async def scenario():
+        _provider, _scheduler, manager = _build_manager(
+            min_ready=1, max_nodes=3, quota_refresh_interval_seconds=None
+        )
+        await manager.start(background=False)
+        try:
+            snap = manager.snapshot()
+            assert snap["quota"] is None
+
+            quota = await manager.refresh_quota_once()
+            assert quota is not None
+            assert quota.is_sufficient is True
+
+            snap = manager.snapshot()
+            q = snap["quota"]
+            assert q is not None
+            assert q["used"] == len(manager.scheduler._nodes)
+            assert q["limit"] == manager.scheduler.config.max_nodes * 4
+            assert q["spot_quota_observed"] is True
+            assert q["is_sufficient"] is True
+            assert q["checked_at"] is not None
+            assert q["error"] is None
+        finally:
+            await manager.stop()
+
+    asyncio.run(scenario())
+
+
+def test_refresh_quota_loop_records_event():
+    async def scenario():
+        _p, _s, manager = _build_manager(
+            min_ready=1, max_nodes=2, quota_refresh_interval_seconds=0.05
+        )
+        await manager.start()
+        try:
+            await asyncio.sleep(0.2)
+            snap = manager.snapshot()
+            assert snap["quota"] is not None
+            event_types = [e["event_type"] for e in snap["recent_events"]]
+            assert "quota_refreshed" in event_types
+        finally:
+            await manager.stop()
+
+    asyncio.run(scenario())
+
+
+def test_manager_rejects_invalid_quota_refresh_interval():
+    provider = InMemorySpotVmProvider()
+    scheduler = SpotVmScheduler(
+        provider=provider, config=SpotPoolConfig(min_ready=1, max_nodes=2)
+    )
+    with pytest.raises(ValueError):
+        SpotPoolManager(scheduler=scheduler, quota_refresh_interval_seconds=0)
+
+
+def test_refresh_quota_handles_provider_error():
+    class FailingProvider(InMemorySpotVmProvider):
+        def check_quota(self, requested_nodes, config):
+            raise RuntimeError("simulated quota probe failure")
+
+    async def scenario():
+        provider = FailingProvider()
+        scheduler = SpotVmScheduler(
+            provider=provider,
+            config=SpotPoolConfig(min_ready=1, max_nodes=2, idle_timeout_seconds=60),
+        )
+        manager = SpotPoolManager(
+            scheduler=scheduler,
+            heartbeat_interval=0.05,
+            reconcile_interval=0.05,
+            quota_refresh_interval_seconds=None,
+        )
+        await manager.start(background=False)
+        try:
+            result = await manager.refresh_quota_once()
+            assert result is None
+            snap = manager.snapshot()
+            q = snap["quota"]
+            assert q is not None
+            assert q["error"] is not None
+            assert "simulated quota probe failure" in q["error"]
+        finally:
+            await manager.stop()
+
+    asyncio.run(scenario())
