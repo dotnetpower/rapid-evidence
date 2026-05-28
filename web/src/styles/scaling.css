@@ -1,0 +1,75 @@
+/* Styles owned by the Scaling Timeline page (SwimlaneChart + EventMarkerList).
+   Isolated from app.css to avoid races with parallel sessions editing that
+   shared file. */
+
+.swimlane {
+  width: 100%;
+}
+.swimlane--empty {
+  padding: 32px;
+  color: var(--text-muted);
+  text-align: center;
+  font-size: 12px;
+}
+.swimlane__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  color: var(--text-muted);
+  padding-bottom: 8px;
+}
+.event-marker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 280px;
+  overflow: auto;
+}
+.event-marker-list--empty {
+  padding: 16px;
+  color: var(--text-muted);
+  text-align: center;
+  font-size: 12px;
+}
+.event-marker-list__row {
+  display: grid;
+  grid-template-columns: 140px 80px 1fr;
+  gap: 10px;
+  align-items: baseline;
+  padding: 4px 8px;
+  border-left: 2px solid var(--border-strong);
+  font-size: 12px;
+}
+.event-marker-list__pill {
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--bg-elev);
+  color: var(--text-strong);
+  border: 1px solid var(--border-strong);
+  text-align: center;
+}
+.event-marker-list__pill--node_provisioned { color: var(--ok); border-color: var(--ok); }
+.event-marker-list__pill--node_evicted { color: var(--bad); border-color: var(--bad); }
+.event-marker-list__pill--node_replaced { color: var(--violet); border-color: var(--violet); }
+.event-marker-list__pill--scale_up { color: var(--info); border-color: var(--info); }
+.event-marker-list__pill--scale_down { color: var(--warn); border-color: var(--warn); }
+.event-marker-list__time {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.event-marker-list__payload {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

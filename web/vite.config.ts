@@ -14,6 +14,8 @@ export default defineConfig({
       "/metrics": "http://localhost:8800",
       "/dashboard": "http://localhost:8800",
       "/run": "http://localhost:8800",
+      "/events": "http://localhost:8800",
+      "/scaling/timeline": "http://localhost:8800",
     },
   },
   test: {
