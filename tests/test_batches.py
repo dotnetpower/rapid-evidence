@@ -184,3 +184,57 @@ async def test_notify_eviction_updates_batch_evictions_observed():
     assert affected_again == {}
 
     await record._task
+
+
+@pytest.mark.asyncio
+async def test_history_records_lifecycle_events_and_caps_at_256():
+    """BatchRecord.history captures queued/started/finished plus eviction events,
+    and is FIFO-capped at 256 entries so it cannot grow unbounded.
+    """
+    source = FakeSource()
+    sink = InMemorySink()
+    registry = _make_registry(source, sink, default_workers=2)
+
+    record = await registry.submit(
+        source="generic-http",
+        targets=[f"https://example.com/{i}" for i in range(3)],
+    )
+    await record._task
+
+    event_types = [e["event_type"] for e in record.history]
+    assert "queued" in event_types
+    assert "started" in event_types
+    assert "finished" in event_types
+    # Each event carries a timestamp and a dict payload.
+    for entry in record.history:
+        assert isinstance(entry["timestamp"], str) and entry["timestamp"]
+        assert isinstance(entry["payload"], dict)
+
+    # Eviction events flow through notify_eviction.
+    registry.notify_eviction(
+        requeue_task_ids=(record.requests[0].request_id,), reason="evicted"
+    )
+    evicted = [e for e in record.history if e["event_type"] == "evicted"]
+    assert len(evicted) == 1
+    assert evicted[0]["payload"]["reason"] == "evicted"
+    assert record.requests[0].request_id in evicted[0]["payload"]["request_ids"]
+
+    progress = registry.progress(record.batch_id)
+    assert progress is not None
+    assert progress.metadata.get("evicted_request_ids") == [
+        record.requests[0].request_id
+    ]
+
+    # FIFO cap at 256 — pump synthetic events past the limit and verify only the
+    # newest 256 survive while preserving order.
+    for i in range(400):
+        record.record_event("synthetic", {"i": i})
+    assert len(record.history) == 256
+    last = record.history[-1]
+    assert last["event_type"] == "synthetic"
+    assert last["payload"]["i"] == 399
+    # The oldest synthetic still present is 399 - 255 = 144 (since the cap keeps
+    # the most recent 256 entries).
+    first_synthetic = next(e for e in record.history if e["event_type"] == "synthetic")
+    assert first_synthetic["payload"]["i"] == 400 - 256
+

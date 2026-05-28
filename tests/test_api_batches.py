@@ -172,3 +172,35 @@ def test_dashboard_summary_aggregates_pool_and_batches(client):
     # scale_target is only available when pool is running
     assert body["scale_target"] is not None
     assert "target_nodes" in body["scale_target"]
+
+
+def test_batch_timeline_endpoint_returns_recorded_events(client):
+    ctx, _, _ = client
+    create = ctx.post(
+        "/batches",
+        json={
+            "source": "generic-http",
+            "targets": ["https://example.com/t1", "https://example.com/t2"],
+            "workers": 2,
+        },
+    )
+    batch_id = create.json()["batch_id"]
+    _wait_for(ctx, batch_id, lambda b: b["status"] == "done")
+
+    resp = ctx.get(f"/batches/{batch_id}/timeline")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "events" in body
+    types = [e["event_type"] for e in body["events"]]
+    # The executor records at least queued + started + finished.
+    assert {"queued", "started", "finished"}.issubset(set(types))
+    for evt in body["events"]:
+        assert isinstance(evt.get("timestamp"), str)
+        assert isinstance(evt.get("event_type"), str)
+        assert isinstance(evt.get("payload"), dict)
+
+
+def test_batch_timeline_returns_404_for_unknown_batch(client):
+    ctx, _, _ = client
+    resp = ctx.get("/batches/batch-does-not-exist/timeline")
+    assert resp.status_code == 404
