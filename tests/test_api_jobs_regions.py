@@ -132,3 +132,64 @@ def test_jobs_registry_rejects_empty_name():
         reg.start("")
     with _pytest.raises(ValueError, match="non-empty"):
         reg.start("   ")
+
+
+def test_emit_quota_increase_suggestions_records_one_job_per_insufficient_region(client):
+    """After a probe that flags regions as insufficient, the scan loop
+    helper opens one quota-increase-suggestion job per region.
+    """
+    from rapid_evidence.api import _emit_quota_increase_suggestions
+    from rapid_evidence.spot.regions import MultiRegionQuotaReport, RegionQuotaProbe
+
+    jobs = client.app.state.jobs
+    # Build a synthetic report with one sufficient + two insufficient regions.
+    report = MultiRegionQuotaReport()
+    report.regions = [
+        RegionQuotaProbe(
+            region="koreacentral",
+            spot_quota_name="standardDASv5Family",
+            used=4,
+            limit=100,
+            is_sufficient=True,
+            headroom=96,
+        ),
+        RegionQuotaProbe(
+            region="japaneast",
+            spot_quota_name="standardDASv5Family",
+            used=10,
+            limit=10,
+            is_sufficient=False,
+            headroom=0,
+        ),
+        RegionQuotaProbe(
+            region="eastus",
+            spot_quota_name="standardDASv5Family",
+            used=8,
+            limit=10,
+            is_sufficient=False,
+            headroom=2,
+        ),
+    ]
+    report.insufficient_regions = ["japaneast", "eastus"]
+
+    before = len(jobs.list(limit=500))
+    _emit_quota_increase_suggestions(
+        jobs=jobs, report=report, spot_quota_name="standardDASv5Family"
+    )
+    after = jobs.list(limit=500)
+    new = [j for j in after if j.name.startswith("quota-increase-suggestion-")]
+    assert len(new) >= 2
+    suggestion_regions = {
+        j.metadata.get("region") for j in new
+    }
+    assert {"japaneast", "eastus"} <= suggestion_regions
+    # Each suggestion should propose at least 2x the current limit.
+    for j in new:
+        if j.metadata.get("region") == "japaneast":
+            assert j.metadata.get("suggested_new_limit") >= 20
+        if j.metadata.get("region") == "eastus":
+            assert j.metadata.get("suggested_new_limit") >= 20
+        assert j.status == "succeeded"
+        assert j.result is not None
+        assert j.result.get("status") == "manual_action_required"
+    assert before <= len(after)

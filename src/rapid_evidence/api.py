@@ -377,6 +377,13 @@ async def _region_scan_loop(
     Default cadence is 24 hours per the requirement; configurable via
     `RAPID_EVIDENCE_REGION_SCAN_INTERVAL_SECONDS`. The first run is
     delayed slightly so the dashboard does not block startup on `az`.
+
+    After every scan we open one `quota-increase-suggestion` job per
+    region flagged as insufficient. Azure does not let `az` submit
+    spot vCPU support tickets directly, so the job result is a
+    structured *manual* plan — but recording it here means the
+    dashboard surfaces an actionable next step instead of the operator
+    needing to dig through the scan result.
     """
     interval = max(60.0, interval_seconds)
     if interval_seconds > 0 and interval_seconds < 60.0:
@@ -390,7 +397,7 @@ async def _region_scan_loop(
         raise
     while True:
         try:
-            await run_tracked(
+            _, result = await run_tracked(
                 jobs,
                 "azure-region-quota-scan",
                 lambda: probe_regions(
@@ -403,6 +410,12 @@ async def _region_scan_loop(
                     "interval_seconds": interval,
                 },
             )
+            if result is not None:
+                _emit_quota_increase_suggestions(
+                    jobs=jobs,
+                    report=result,
+                    spot_quota_name=spot_quota_name,
+                )
         except Exception as exc:  # noqa: BLE001
             logging.getLogger(__name__).warning(
                 "region scan loop iteration failed: %s", exc
@@ -411,6 +424,51 @@ async def _region_scan_loop(
             await asyncio.sleep(interval)
         except asyncio.CancelledError:
             raise
+
+
+def _emit_quota_increase_suggestions(
+    *,
+    jobs: BackgroundJobRegistry,
+    report,
+    spot_quota_name: str,
+) -> None:
+    """Record one suggestion job per insufficient region.
+
+    Defensive: this function never raises into the scan loop. A bad
+    `report` shape just yields zero suggestions.
+    """
+    insufficient = getattr(report, "insufficient_regions", None) or []
+    if not insufficient:
+        return
+    region_probes = {p.region: p for p in (getattr(report, "regions", None) or [])}
+    for region in insufficient:
+        probe = region_probes.get(region)
+        if probe is None or probe.limit is None:
+            continue
+        # Suggest doubling the current limit, clamped to the same
+        # sane upper bound as request_quota_increase().
+        new_limit = max(probe.limit * 2, probe.limit + 8)
+        new_limit = min(new_limit, 100_000)
+        try:
+            plan = request_quota_increase(
+                region,
+                spot_quota_name=spot_quota_name,
+                new_limit=new_limit,
+            )
+        except ValueError:
+            continue
+        job = jobs.start(
+            f"quota-increase-suggestion-{region}",
+            metadata={
+                "region": region,
+                "spot_quota_name": spot_quota_name,
+                "current_used": probe.used,
+                "current_limit": probe.limit,
+                "suggested_new_limit": new_limit,
+                "trigger": "periodic-region-scan",
+            },
+        )
+        jobs.finish(job.job_id, status="succeeded", result=plan)
 
 
 app = FastAPI(lifespan=lifespan)

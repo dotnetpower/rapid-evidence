@@ -1,4 +1,4 @@
-import { StrictMode } from "react";
+import { StrictMode, Suspense, lazy } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -8,7 +8,12 @@ import { BatchesPage } from "./pages/BatchesPage";
 import { AuditPage } from "./pages/AuditPage";
 import { ScalingTimelinePage } from "./pages/ScalingTimelinePage";
 import { QuotaPage } from "./pages/QuotaPage";
-import { RegionsPage } from "./pages/RegionsPage";
+// Code-split: the regions page pulls in leaflet (~150 KB gzip) which
+// no other page uses. Loading it on demand keeps the initial bundle
+// lean for the default route.
+const RegionsPage = lazy(() =>
+  import("./pages/RegionsPage").then((m) => ({ default: m.RegionsPage })),
+);
 import { I18nProvider } from "./lib/i18n";
 import "./styles/tokens.css";
 import "./styles/app.css";
@@ -40,7 +45,14 @@ createRoot(root).render(
               <Route path="/audit" element={<AuditPage />} />
               <Route path="/scaling" element={<ScalingTimelinePage />} />
               <Route path="/quota" element={<QuotaPage />} />
-              <Route path="/regions" element={<RegionsPage />} />
+              <Route
+                path="/regions"
+                element={
+                  <Suspense fallback={<div className="empty" style={{ padding: 24 }}>loading map…</div>}>
+                    <RegionsPage />
+                  </Suspense>
+                }
+              />
             </Route>
           </Routes>
         </BrowserRouter>

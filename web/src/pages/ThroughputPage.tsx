@@ -94,8 +94,7 @@ export function ThroughputPage() {
         />
         <KpiCard
           label={t("kpi.spot.label")}
-          value={activeVms}
-          unit={`/ ${target || "—"} / ${maxNodes || "—"}`}
+          value={`${activeVms} / ${target || "—"} / ${maxNodes || "—"}`}
           detail={
             data?.pool?.running
               ? t("kpi.spot.detail", {

@@ -9,12 +9,16 @@ from rapid_evidence.spot.models import (
 class InMemorySpotVmProvider:
     provider_name = "in-memory"
 
-    def __init__(self):
+    def __init__(self, *, fake_region: str = "local"):
         self._nodes: dict[str, SpotNode] = {}
+        # Tag fake nodes with a region so the dashboard's per-region
+        # grouping and world map have something to show even without
+        # the real Azure CLI provider wired in.
+        self._fake_region = fake_region
 
     def create_nodes(self, count: int, config: SpotPoolConfig) -> tuple[SpotNode, ...]:
         created = []
-        for index in range(count):
+        for _ in range(count):
             node_id = f"node-{len(self._nodes)+1}"
             node = SpotNode(
                 node_id=node_id,
@@ -24,6 +28,7 @@ class InMemorySpotVmProvider:
                 outbound_ip=f"10.0.0.{len(self._nodes)+1}",
                 inflight=0,
                 vm_size="Standard_D2as_v5",
+                metadata={"region": self._fake_region},
             )
             self._nodes[node_id] = node
             created.append(node)

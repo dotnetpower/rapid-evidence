@@ -37,6 +37,17 @@ export function AppShell() {
     refetchIntervalInBackground: false,
     staleTime: 1500,
   });
+  const jobs = useQuery({
+    queryKey: ["jobs", "appshell"],
+    queryFn: () => api.jobsList(50),
+    refetchInterval: 5000,
+    refetchIntervalInBackground: false,
+    staleTime: 3000,
+  });
+  const runningJobs = (jobs.data?.jobs ?? []).filter((j) => j.status === "running").length;
+  const failedJobs = (jobs.data?.jobs ?? [])
+    .slice(-10)
+    .filter((j) => j.status === "failed").length;
 
   const sample = summary.data?.latest_sample;
   const interval = summary.data?.sample_interval_seconds;
@@ -148,6 +159,14 @@ export function AppShell() {
         </span>
         <span className="seg">
           {t("bar.drainEta")} {formatDuration(summary.data?.drain_eta_seconds ?? null)}
+        </span>
+        <span className="seg" title={t("bar.jobsTooltip")}>
+          ⚙ {t("bar.jobs")} {runningJobs}
+          {failedJobs > 0 && (
+            <span style={{ marginLeft: 4, color: "var(--bad, #e06c75)" }}>
+              · {failedJobs} {t("bar.failed")}
+            </span>
+          )}
         </span>
         <span className="seg" style={{ marginLeft: "auto" }}>
           {t("bar.lastSample")} {timeAgo(sample?.timestamp ?? null)}

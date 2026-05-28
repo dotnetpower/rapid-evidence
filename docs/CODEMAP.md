@@ -153,15 +153,22 @@ Gaps to close on next test refactor:
 | [web/src/components/audit/EventRow.tsx](../web/src/components/audit/EventRow.tsx) | Audit row: relative + absolute timestamp, colour-coded type pill, on-demand payload toggle. |
 | [web/src/components/scaling/SwimlaneChart.tsx](../web/src/components/scaling/SwimlaneChart.tsx) | recharts `ComposedChart` of ready/busy/provisioning/draining VMs (stacked area) with scale-event markers. |
 | [web/src/components/scaling/EventMarkerList.tsx](../web/src/components/scaling/EventMarkerList.tsx) | Newest-first scale-events list paired with the SwimlaneChart. |
+| [web/src/components/regions/RegionCard.tsx](../web/src/components/regions/RegionCard.tsx) | Region card (clickable, summary metrics) for the `/regions` cards view. |
+| [web/src/components/regions/RegionsMap.tsx](../web/src/components/regions/RegionsMap.tsx) | World map (react-leaflet) for `/regions`, marker colour by status, tooltip with nodes / quota / evictions. |
+| [web/src/components/regions/regionGeo.ts](../web/src/components/regions/regionGeo.ts) | Static lat/lon catalogue of Azure public regions used by `RegionsMap`. |
+| [web/src/components/jobs/JobsPanel.tsx](../web/src/components/jobs/JobsPanel.tsx) | Background-jobs panel for the `/quota` page (scan-now button + recent jobs list). |
 | [web/src/components/NewBatchDialog.tsx](../web/src/components/NewBatchDialog.tsx) | New batch dialog. |
 | [web/src/components/ThroughputChart.tsx](../web/src/components/ThroughputChart.tsx) | Throughput chart. |
 | [web/src/pages/ThroughputPage.tsx](../web/src/pages/ThroughputPage.tsx) | Throughput page route. |
 | [web/src/pages/BatchesPage.tsx](../web/src/pages/BatchesPage.tsx) | Batches page route — filter/sort bar, full table, URL-driven `/batches/:batchId` detail drawer. |
 | [web/src/pages/AuditPage.tsx](../web/src/pages/AuditPage.tsx) | Audit page route. Tails `GET /events` via incremental `since=` cursor; bounded local buffer (500 events); filter chips. |
 | [web/src/pages/ScalingTimelinePage.tsx](../web/src/pages/ScalingTimelinePage.tsx) | Scaling timeline page route. Reads `GET /scaling/timeline`; 15m/60m/6h window toggle; SwimlaneChart + EventMarkerList. |
+| [web/src/pages/QuotaPage.tsx](../web/src/pages/QuotaPage.tsx) | Quota page route — per-region quota meters + JobsPanel. |
+| [web/src/pages/RegionsPage.tsx](../web/src/pages/RegionsPage.tsx) | Regions page route — `map ↔ cards` toggle, latest scan job overlaid on map. Lazy-loaded via `Suspense` to keep leaflet out of the main bundle. |
 | [web/src/test/setup.ts](../web/src/test/setup.ts) | Vitest setup hook. |
 | [web/src/styles/audit.css](../web/src/styles/audit.css) | Page-scoped styles for the Audit page (imported by `AuditPage.tsx`). Kept separate from `app.css` to avoid races with other sessions editing the shared stylesheet. |
 | [web/src/styles/scaling.css](../web/src/styles/scaling.css) | Page-scoped styles for the Scaling Timeline page (imported by `ScalingTimelinePage.tsx`). |
+| [web/src/styles/quota-regions.css](../web/src/styles/quota-regions.css) | Page-scoped styles for the Quota + Regions pages, including world-map and legend styling. |
 | [web/src/__tests__/format.test.ts](../web/src/__tests__/format.test.ts) | Vitest suite for `lib/format`. |
 
 ## Scripts & docs
