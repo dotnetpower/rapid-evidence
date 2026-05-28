@@ -96,3 +96,39 @@ def test_quota_request_increase_returns_manual_plan_and_records_job(client):
     job_resp = client.get(f"/jobs/{body['job_id']}")
     assert job_resp.status_code == 200
     assert job_resp.json()["status"] == "succeeded"
+
+
+def test_quota_probe_regions_rejects_invalid_region(client):
+    resp = client.post(
+        "/quota/probe-regions", json={"regions": ["east us"]}
+    )
+    assert resp.status_code == 400
+    assert "invalid Azure region" in resp.json()["detail"]
+
+
+def test_quota_request_increase_rejects_invalid_input(client):
+    resp = client.post(
+        "/quota/request-increase",
+        json={"region": "east us", "new_limit": 10},
+    )
+    assert resp.status_code == 400
+    assert "invalid Azure region" in resp.json()["detail"]
+
+    resp = client.post(
+        "/quota/request-increase",
+        json={"region": "eastus", "new_limit": 0},
+    )
+    assert resp.status_code == 400
+    assert "new_limit must be positive" in resp.json()["detail"]
+
+
+def test_jobs_registry_rejects_empty_name():
+    from rapid_evidence.jobs import BackgroundJobRegistry
+
+    reg = BackgroundJobRegistry()
+    import pytest as _pytest
+
+    with _pytest.raises(ValueError, match="non-empty"):
+        reg.start("")
+    with _pytest.raises(ValueError, match="non-empty"):
+        reg.start("   ")

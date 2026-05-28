@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -24,6 +25,12 @@ from typing import Iterable, Sequence
 
 
 logger = logging.getLogger(__name__)
+
+
+# Azure region names: lowercase letters + digits, no shell metacharacters.
+_REGION_RE = re.compile(r"^[a-z][a-z0-9]{1,40}$")
+# Spot quota names: Azure SKU family identifiers.
+_QUOTA_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{1,80}$")
 
 
 # Curated short list of common Azure spot-VM-friendly regions.
@@ -126,6 +133,11 @@ async def probe_regions(
     selected = tuple(regions) if regions is not None else DEFAULT_REGIONS
     if not selected:
         return MultiRegionQuotaReport()
+    invalid = [r for r in selected if not _REGION_RE.match(r)]
+    if invalid:
+        raise ValueError(f"invalid Azure region names: {invalid!r}")
+    if not _QUOTA_NAME_RE.match(spot_quota_name):
+        raise ValueError(f"invalid spot_quota_name: {spot_quota_name!r}")
 
     if shutil.which(az_binary) is None:
         # No `az` CLI on this host — return a report shaped like a
@@ -178,8 +190,9 @@ async def _probe_one_region(
                 az_binary=az_binary,
                 region=region,
                 spot_quota_name=spot_quota_name,
+                timeout_seconds=timeout_seconds,
             ),
-            timeout=timeout_seconds,
+            timeout=timeout_seconds + 1.0,
         )
     except asyncio.TimeoutError:
         return RegionQuotaProbe(
@@ -190,6 +203,17 @@ async def _probe_one_region(
             is_sufficient=None,
             headroom=None,
             error=f"az timed out after {timeout_seconds:.0f}s",
+            duration_seconds=loop.time() - started,
+        )
+    except subprocess.TimeoutExpired:
+        return RegionQuotaProbe(
+            region=region,
+            spot_quota_name=spot_quota_name,
+            used=None,
+            limit=None,
+            is_sufficient=None,
+            headroom=None,
+            error=f"az subprocess timed out after {timeout_seconds:.0f}s",
             duration_seconds=loop.time() - started,
         )
     except Exception as exc:  # noqa: BLE001
@@ -259,7 +283,7 @@ async def _probe_one_region(
 
 
 def _run_az_usage(
-    *, az_binary: str, region: str, spot_quota_name: str
+    *, az_binary: str, region: str, spot_quota_name: str, timeout_seconds: float
 ) -> subprocess.CompletedProcess[str]:
     cmd = [
         az_binary,
@@ -272,8 +296,14 @@ def _run_az_usage(
         "-o",
         "json",
     ]
+    # Hard subprocess timeout so a cancelled asyncio.wait_for does not
+    # leave the `az` process running on its own.
     return subprocess.run(
-        cmd, capture_output=True, text=True, check=False
+        cmd,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=max(1.0, timeout_seconds),
     )
 
 
@@ -312,6 +342,12 @@ def request_quota_increase(
     the operator should run (or click) — and records the intent in the
     background job registry when called via the API route.
     """
+    if not _REGION_RE.match(region):
+        raise ValueError(f"invalid Azure region: {region!r}")
+    if not _QUOTA_NAME_RE.match(spot_quota_name):
+        raise ValueError(f"invalid spot_quota_name: {spot_quota_name!r}")
+    if new_limit <= 0:
+        raise ValueError("new_limit must be positive")
     return {
         "region": region,
         "spot_quota_name": spot_quota_name,

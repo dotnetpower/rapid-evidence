@@ -47,7 +47,7 @@ def test_probe_regions_parses_az_output_in_parallel(monkeypatch):
     monkeypatch.setattr(regions_mod.shutil, "which", lambda _name: "/usr/bin/az")
     calls: list[tuple[str, ...]] = []
 
-    def fake_run(cmd, capture_output, text, check):
+    def fake_run(cmd, capture_output, text, check, timeout=None):
         # extract the --location value
         loc = cmd[cmd.index("--location") + 1]
         calls.append(tuple(cmd))
@@ -167,3 +167,64 @@ def test_request_quota_increase_returns_structured_manual_steps():
     assert plan["new_limit"] == 64
     assert any("support tickets create" in step for step in plan["next_steps"])
     assert any("portal.azure.com" in step for step in plan["next_steps"])
+
+
+def test_probe_regions_rejects_invalid_region_name():
+    async def scenario():
+        with pytest.raises(ValueError, match="invalid Azure region"):
+            await regions_mod.probe_regions(regions=["east us"])
+        with pytest.raises(ValueError, match="invalid Azure region"):
+            await regions_mod.probe_regions(regions=["eastus; rm -rf /"])
+        with pytest.raises(ValueError, match="invalid spot_quota_name"):
+            await regions_mod.probe_regions(
+                regions=["eastus"], spot_quota_name="bad name!"
+            )
+
+    asyncio.run(scenario())
+
+
+def test_request_quota_increase_rejects_invalid_input():
+    with pytest.raises(ValueError, match="invalid Azure region"):
+        regions_mod.request_quota_increase(
+            "east us", spot_quota_name="standardDASv5Family", new_limit=1
+        )
+    with pytest.raises(ValueError, match="invalid spot_quota_name"):
+        regions_mod.request_quota_increase(
+            "eastus", spot_quota_name="bad name", new_limit=1
+        )
+    with pytest.raises(ValueError, match="new_limit must be positive"):
+        regions_mod.request_quota_increase(
+            "eastus", spot_quota_name="standardDASv5Family", new_limit=0
+        )
+
+
+def test_jobs_get_returns_snapshot_not_live_reference():
+    from rapid_evidence.jobs import BackgroundJobRegistry
+
+    reg = BackgroundJobRegistry()
+    job = reg.start("scan", metadata={"a": 1})
+    snap = reg.get(job.job_id)
+    assert snap is not None
+    # Mutating the snapshot must NOT change the registry's view.
+    snap.metadata["a"] = 999
+    fresh = reg.get(job.job_id)
+    assert fresh is not None and fresh.metadata["a"] == 1
+
+
+def test_probe_regions_catches_subprocess_timeout(monkeypatch):
+    monkeypatch.setattr(regions_mod.shutil, "which", lambda _n: "/usr/bin/az")
+
+    def fake_run(cmd, capture_output, text, check, timeout=None):
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=timeout or 1.0)
+
+    monkeypatch.setattr(regions_mod.subprocess, "run", fake_run)
+
+    async def scenario():
+        report = await regions_mod.probe_regions(
+            regions=("eastus",), per_region_timeout_seconds=1.0
+        )
+        p = report.regions[0]
+        assert p.observed is False
+        assert "subprocess timed out" in (p.error or "")
+
+    asyncio.run(scenario())

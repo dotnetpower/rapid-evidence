@@ -379,6 +379,11 @@ async def _region_scan_loop(
     delayed slightly so the dashboard does not block startup on `az`.
     """
     interval = max(60.0, interval_seconds)
+    if interval_seconds > 0 and interval_seconds < 60.0:
+        logging.getLogger(__name__).warning(
+            "region scan interval %.1fs is below the 60s floor; using 60s",
+            interval_seconds,
+        )
     try:
         await asyncio.sleep(max(0.0, initial_delay_seconds))
     except asyncio.CancelledError:
@@ -874,6 +879,23 @@ async def quota_probe_regions(payload: QuotaProbeRequest, request: Request):
     if jobs is None:
         raise HTTPException(status_code=503, detail="jobs registry not initialised")
     regions_tuple = tuple(payload.regions) if payload.regions else None
+    # Validate before we ever start the job so the operator gets a 400
+    # synchronously instead of a generic 500 / failed job record.
+    try:
+        from rapid_evidence.spot.regions import _QUOTA_NAME_RE, _REGION_RE
+
+        if regions_tuple is not None:
+            bad = [r for r in regions_tuple if not _REGION_RE.match(r)]
+            if bad:
+                raise ValueError(f"invalid Azure region names: {bad!r}")
+        if not _QUOTA_NAME_RE.match(payload.spot_quota_name):
+            raise ValueError(f"invalid spot_quota_name: {payload.spot_quota_name!r}")
+        if payload.max_parallelism < 1 or payload.max_parallelism > 64:
+            raise ValueError("max_parallelism must be in [1, 64]")
+        if payload.per_region_timeout_seconds <= 0:
+            raise ValueError("per_region_timeout_seconds must be positive")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     job, _ = await run_tracked(
         jobs,
         "azure-region-quota-scan",
@@ -902,11 +924,14 @@ class QuotaIncreaseRequest(BaseModel):
 @app.post("/quota/request-increase")
 def quota_request_increase(payload: QuotaIncreaseRequest, request: Request):
     jobs: BackgroundJobRegistry | None = getattr(request.app.state, "jobs", None)
-    plan = request_quota_increase(
-        payload.region,
-        spot_quota_name=payload.spot_quota_name,
-        new_limit=payload.new_limit,
-    )
+    try:
+        plan = request_quota_increase(
+            payload.region,
+            spot_quota_name=payload.spot_quota_name,
+            new_limit=payload.new_limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if jobs is not None:
         job = jobs.start(
             f"quota-increase-request-{payload.region}",

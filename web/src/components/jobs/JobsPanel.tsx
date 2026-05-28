@@ -3,8 +3,6 @@ import { api, type BackgroundJob } from "../../lib/api";
 import { useI18n } from "../../lib/i18n";
 import { timeAgo } from "../../lib/format";
 
-const DEFAULT_REGIONS_COUNT = 17;
-
 function summariseResult(job: BackgroundJob): string {
   if (job.error) return job.error;
   const r = job.result;
@@ -46,6 +44,14 @@ export function JobsPanel() {
 
   const rows = jobs.data?.jobs ?? [];
   const ordered = [...rows].reverse();
+  const lastScanRegions = (() => {
+    for (const job of ordered) {
+      if (job.name !== "azure-region-quota-scan") continue;
+      const regions = (job.metadata as { regions?: unknown }).regions;
+      if (Array.isArray(regions)) return regions.length;
+    }
+    return null;
+  })();
 
   return (
     <section className="panel" style={{ marginTop: 16 }}>
@@ -66,7 +72,7 @@ export function JobsPanel() {
             </button>
           </div>
           <div className="jobs-probe__hint">
-            {t("jobs.probe.hint", { count: DEFAULT_REGIONS_COUNT })}
+            {t("jobs.probe.hint", { count: lastScanRegions ?? "?" })}
           </div>
           {probe.error ? (
             <div className="error-banner" style={{ marginTop: 8 }}>

@@ -14,12 +14,16 @@ observability surface, not a durable queue.
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from rapid_evidence.core.ids import new_id
 from rapid_evidence.core.time import utc_now_iso
+
+
+logger = logging.getLogger(__name__)
 
 
 JobStatus = Literal["running", "succeeded", "failed", "cancelled"]
@@ -66,9 +70,12 @@ class BackgroundJobRegistry:
         self._lock = threading.Lock()
 
     def start(self, name: str, *, metadata: dict[str, Any] | None = None) -> BackgroundJob:
+        clean = (name or "").strip()
+        if not clean:
+            raise ValueError("BackgroundJob name must be non-empty")
         job = BackgroundJob(
             job_id=new_id("job"),
-            name=name,
+            name=clean,
             started_at=utc_now_iso(),
             metadata=dict(metadata or {}),
         )
@@ -110,15 +117,19 @@ class BackgroundJobRegistry:
             job.metadata.update(patch)
 
     def get(self, job_id: str) -> BackgroundJob | None:
+        """Return a *snapshot* copy so callers cannot mutate the registry's view."""
         with self._lock:
-            return self._jobs.get(job_id)
+            job = self._jobs.get(job_id)
+            if job is None:
+                return None
+            return _snapshot(job)
 
     def list(self, *, limit: int = 50) -> list[BackgroundJob]:
         if limit <= 0:
             return []
         with self._lock:
             tail = self._order[-limit:]
-            return [self._jobs[j] for j in tail if j in self._jobs]
+            return [_snapshot(self._jobs[j]) for j in tail if j in self._jobs]
 
     def _evict_locked(self) -> None:
         overflow = len(self._order) - self._max_jobs
@@ -127,7 +138,29 @@ class BackgroundJobRegistry:
         evicted = self._order[:overflow]
         self._order = self._order[overflow:]
         for jid in evicted:
-            self._jobs.pop(jid, None)
+            removed = self._jobs.pop(jid, None)
+            if removed is not None:
+                logger.info(
+                    "background job evicted from registry (capacity=%d): job_id=%s name=%s status=%s",
+                    self._max_jobs,
+                    removed.job_id,
+                    removed.name,
+                    removed.status,
+                )
+
+
+def _snapshot(job: BackgroundJob) -> BackgroundJob:
+    return BackgroundJob(
+        job_id=job.job_id,
+        name=job.name,
+        started_at=job.started_at,
+        status=job.status,
+        finished_at=job.finished_at,
+        duration_seconds=job.duration_seconds,
+        result=dict(job.result) if job.result is not None else None,
+        error=job.error,
+        metadata=dict(job.metadata),
+    )
 
 
 def _parse_iso(timestamp: str):

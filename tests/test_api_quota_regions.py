@@ -19,6 +19,9 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setenv("RAPID_EVIDENCE_POOL_MAX_NODES", "2")
     # Fast quota refresh so the loop populates quickly.
     monkeypatch.setenv("RAPID_EVIDENCE_QUOTA_REFRESH_SECONDS", "0.05")
+    # Disable the multi-region scan loop so it does not hit real `az`
+    # during these tests.
+    monkeypatch.setenv("RAPID_EVIDENCE_REGION_SCAN_INTERVAL_SECONDS", "0")
 
     from rapid_evidence import api as api_module
 
@@ -68,6 +71,7 @@ def test_quota_status_includes_error_when_provider_fails(monkeypatch, tmp_path):
     monkeypatch.setenv("RAPID_EVIDENCE_POOL_MIN_READY", "1")
     monkeypatch.setenv("RAPID_EVIDENCE_POOL_MAX_NODES", "2")
     monkeypatch.setenv("RAPID_EVIDENCE_QUOTA_REFRESH_SECONDS", "60")
+    monkeypatch.setenv("RAPID_EVIDENCE_REGION_SCAN_INTERVAL_SECONDS", "0")
 
     from rapid_evidence import api as api_module
 
