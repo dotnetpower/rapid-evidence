@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>rapid-evidence — v2 / 3. Scaling Timeline</title>
+<style>
+  :root {
+    --bg-app: #1f1f1f;
+    --bg-side: #181818;
+    --bg-panel: #1f1f1f;
+    --bg-elev: #252526;
+    --bg-hover: #2a2d2e;
+    --border: #2b2b2b;
+    --border-strong: #3c3c3c;
+    --text: #cccccc;
+    --text-strong: #f3f3f3;
+    --text-muted: #9d9d9d;
+    --text-dim: #6e6e6e;
+    --accent: #0078d4;
+    --accent-soft: #094771;
+    --info: #4fc1ff;
+    --ok: #89d185;
+    --warn: #cca700;
+    --bad: #f48771;
+    --violet: #c586c0;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg-app); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Pretendard", system-ui, sans-serif;
+    font-size: 13px; line-height: 1.45;
+  }
+  .app { display: grid; grid-template-columns: 200px 1fr; grid-template-rows: 36px 1fr 22px; height: 100vh; }
+
+  .titlebar {
+    grid-column: 1 / 3; background: var(--bg-side); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; padding: 0 12px; gap: 14px; font-size: 12px; color: var(--text-muted);
+  }
+  .titlebar .brand { color: var(--text-strong); font-weight: 600; }
+  .titlebar .crumbs b { color: var(--text); font-weight: 500; }
+  .titlebar .right { margin-left: auto; display: flex; gap: 14px; align-items: center; }
+  .led::before { content:""; width:7px; height:7px; border-radius:50%; background: var(--ok); display:inline-block; margin-right:6px; }
+
+  .sidebar { background: var(--bg-side); border-right: 1px solid var(--border); padding: 10px 4px; }
+  .nav { display: flex; align-items: center; gap: 10px; padding: 6px 10px; margin: 0 4px; color: var(--text-muted); cursor: pointer; border-radius: 4px; font-size: 13px; }
+  .nav:hover { background: var(--bg-hover); color: var(--text); }
+  .nav.active { background: var(--accent-soft); color: var(--text-strong); }
+  .nav .ic { width: 14px; text-align: center; font-size: 12px; color: var(--text-dim); }
+  .nav.active .ic { color: var(--text-strong); }
+  .sidebar .section { color: var(--text-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; padding: 14px 14px 6px; }
+
+  .content { padding: 16px 20px 24px; overflow: auto; }
+  .page-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 14px; }
+  .page-head h1 { margin: 0; font-size: 15px; font-weight: 600; color: var(--text-strong); }
+  .page-head .sub { color: var(--text-muted); font-size: 12px; margin-top: 2px; }
+  .btn { background: var(--bg-elev); color: var(--text); border: 1px solid var(--border-strong); border-radius: 3px; padding: 5px 12px; font-size: 12px; cursor: pointer; }
+  .btn:hover { background: var(--bg-hover); }
+  .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+  /* KPI strip */
+  .kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 4px; overflow: hidden; margin-bottom: 16px; }
+  .kpi { background: var(--bg-panel); padding: 12px 14px; }
+  .kpi .l { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .kpi .v { font-size: 22px; font-weight: 600; color: var(--text-strong); margin-top: 2px; font-family: var(--mono); }
+  .kpi .v small { color: var(--text-muted); font-size: 11px; margin-left: 4px; font-weight: 400; }
+  .kpi .d { color: var(--text-muted); font-size: 11px; margin-top: 3px; }
+  .kpi .d.ok   { color: var(--ok); }
+  .kpi .d.warn { color: var(--warn); }
+
+  .panel { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 4px; margin-bottom: 16px; }
+  .panel-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--text-muted); font-size: 12px; }
+  .panel-head .title { color: var(--text); font-weight: 500; }
+  .panel-head .meta { font-size: 11px; font-family: var(--mono); }
+
+  /* sparkline strip (backlog + rate) */
+  .strip { padding: 10px 14px; display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .spark { display: grid; grid-template-rows: auto 1fr; gap: 4px; }
+  .spark .h { display: flex; justify-content: space-between; align-items: baseline; font-size: 11px; color: var(--text-muted); }
+  .spark .h b { color: var(--text-strong); font-family: var(--mono); font-size: 16px; font-weight: 600; }
+  .spark svg { width: 100%; height: 60px; }
+
+  /* timeline */
+  .tl-wrap { padding: 10px 0 4px; }
+  .tl-axis {
+    display: grid; grid-template-columns: 200px 1fr;
+    padding: 6px 0 4px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-dim); font-size: 10px; font-family: var(--mono);
+  }
+  .tl-axis .empty {}
+  .tl-axis .ticks { position: relative; height: 14px; padding: 0 14px; }
+  .tl-axis .ticks span { position: absolute; top: 0; transform: translateX(-50%); }
+
+  .tl-row {
+    display: grid; grid-template-columns: 200px 1fr;
+    border-bottom: 1px solid var(--border);
+    align-items: stretch;
+  }
+  .tl-row:last-child { border-bottom: none; }
+  .tl-row:hover { background: var(--bg-hover); }
+  .tl-meta {
+    padding: 8px 14px;
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .tl-meta .id { color: var(--text-strong); font-family: var(--mono); font-size: 12px; }
+  .tl-meta .sub { color: var(--text-muted); font-size: 11px; }
+  .tl-track {
+    position: relative; height: 36px; padding: 8px 14px;
+    background-image:
+      linear-gradient(to right, rgba(255,255,255,0.02) 1px, transparent 1px);
+    background-size: 8.33% 100%; /* 12 columns */
+  }
+  .seg {
+    position: absolute; top: 50%; height: 14px; transform: translateY(-50%);
+    border-radius: 2px;
+    display: flex; align-items: center; justify-content: center;
+    color: rgba(0,0,0,0.7); font-size: 9px; font-family: var(--mono); font-weight: 600;
+    overflow: hidden; white-space: nowrap;
+  }
+  .seg.prov   { background: var(--info); }
+  .seg.ready  { background: var(--ok); }
+  .seg.run    { background: var(--violet); }
+  .seg.drain  { background: var(--warn); }
+  .seg.fail   { background: var(--bad); }
+  .seg.term   { background: var(--text-dim); }
+  .seg .lbl { padding: 0 4px; }
+  .now {
+    position: absolute; top: 0; bottom: 0; width: 1px;
+    background: var(--text-muted);
+  }
+  .now::after {
+    content: "now"; position: absolute; top: -2px; right: 4px;
+    color: var(--text-muted); font-size: 9px; font-family: var(--mono);
+  }
+
+  .tl-legend {
+    padding: 8px 14px; display: flex; gap: 14px; font-size: 11px; color: var(--text-muted);
+    border-top: 1px solid var(--border);
+  }
+  .tl-legend span::before {
+    content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px;
+  }
+  .lg-prov::before  { background: var(--info); }
+  .lg-ready::before { background: var(--ok); }
+  .lg-run::before   { background: var(--violet); }
+  .lg-drain::before { background: var(--warn); }
+  .lg-fail::before  { background: var(--bad); }
+  .lg-term::before  { background: var(--text-dim); }
+
+  /* batch processing table */
+  table.batches { width: 100%; border-collapse: collapse; font-size: 12px; }
+  table.batches th, table.batches td { padding: 8px 14px; text-align: left; }
+  table.batches thead th { color: var(--text-muted); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; border-bottom: 1px solid var(--border); background: var(--bg-elev); }
+  table.batches tbody td { border-bottom: 1px solid var(--border); font-family: var(--mono); }
+  table.batches tbody td.name { font-family: -apple-system, "Segoe UI", sans-serif; }
+  table.batches tbody tr:hover { background: var(--bg-hover); }
+  .tag { display: inline-block; padding: 1px 7px; font-size: 10px; border-radius: 2px; border: 1px solid var(--border-strong); color: var(--text-muted); font-family: -apple-system, "Segoe UI", sans-serif; }
+  .tag.run    { color: var(--violet); border-color: #5a3a55; }
+  .tag.queued { color: var(--text-muted); }
+  .tag.paused { color: var(--warn);   border-color: #5a4a1a; }
+  .tag.done   { color: var(--ok);     border-color: #3a5a3a; }
+  .prog { display: grid; grid-template-columns: 1fr 40px; align-items: center; gap: 8px; min-width: 160px; }
+  .meter { height: 4px; background: #2b2b2b; border-radius: 2px; overflow: hidden; }
+  .meter > span { display: block; height: 100%; background: var(--violet); }
+  .meter.ok > span { background: var(--ok); }
+  .meter.warn > span { background: var(--warn); }
+  .meter.info > span { background: var(--info); }
+  .pct { font-family: var(--mono); font-size: 11px; color: var(--text); text-align: right; }
+
+  .statusbar {
+    grid-column: 1 / 3; background: var(--accent); color: #fff; font-size: 11px;
+    padding: 0 12px; display: flex; align-items: center; gap: 14px;
+  }
+  .statusbar .seg-s::before { content: "·"; margin-right: 14px; color: rgba(255,255,255,0.5); }
+  .statusbar .seg-s:first-child::before { content: ""; margin: 0; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="titlebar">
+    <span class="brand">rapid-evidence</span>
+    <span>Operations / <b>Scaling Timeline</b></span>
+    <span class="right">
+      <span><span class="led"></span>connected · /pool/status 2s</span>
+      <span>last 15 min · 18 nodes</span>
+    </span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="nav"><span class="ic">≡</span> Throughput</div>
+    <div class="nav"><span class="ic">▦</span> Regions</div>
+    <div class="nav"><span class="ic">⛁</span> Batches</div>
+    <div class="nav active"><span class="ic">▥</span> Scaling Timeline</div>
+    <div class="nav"><span class="ic">▤</span> Quota</div>
+    <div class="nav"><span class="ic">⏚</span> Audit</div>
+    <div class="section">Window</div>
+    <div class="nav"><span class="ic">●</span> Last 15 min</div>
+    <div class="nav"><span class="ic">○</span> Last 1 h</div>
+    <div class="nav"><span class="ic">○</span> Last 6 h</div>
+  </aside>
+
+  <main class="content">
+
+    <div class="page-head">
+      <div>
+        <h1>스케일링 타임라인</h1>
+        <div class="sub">노드별 lifecycle (provisioning → ready → running → drain)을 시간축에서 확인. 백로그 급증 후 풀이 얼마나 빨리 따라잡는지 추적.</div>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <button class="btn">⟳ Quota sweep</button>
+        <button class="btn primary">＋ 새 배치</button>
+      </div>
+    </div>
+
+    <!-- KPI strip -->
+    <div class="kpis">
+      <div class="kpi">
+        <div class="l">backlog</div>
+        <div class="v">9,684 <small>req</small></div>
+        <div class="d">유입 <b>+128 r/s</b></div>
+      </div>
+      <div class="kpi">
+        <div class="l">throughput</div>
+        <div class="v">82 <small>r/s</small></div>
+        <div class="d ok">▲ 14 r/s</div>
+      </div>
+      <div class="kpi">
+        <div class="l">spot vm</div>
+        <div class="v">38 <small>/ 64 target</small></div>
+        <div class="d warn">9 prov · 4 drain</div>
+      </div>
+      <div class="kpi">
+        <div class="l">cold start</div>
+        <div class="v">83s <small>p95 142s</small></div>
+        <div class="d">최근 10개 노드 기준</div>
+      </div>
+      <div class="kpi">
+        <div class="l">drain ETA</div>
+        <div class="v">~ 42m</div>
+        <div class="d">(풀 확장 완료 가정)</div>
+      </div>
+    </div>
+
+    <!-- sparkline strip -->
+    <section class="panel">
+      <div class="panel-head">
+        <span class="title">최근 15분 추세</span>
+        <span class="meta">샘플 5초 · 회색 막대 = scale-up 발생</span>
+      </div>
+      <div class="strip">
+        <div class="spark">
+          <div class="h"><span>backlog</span><b>9,684 req</b></div>
+          <svg viewBox="0 0 400 60" preserveAspectRatio="none">
+            <g stroke="#2b2b2b" stroke-width="1"><line x1="0" y1="20" x2="400" y2="20"/><line x1="0" y1="40" x2="400" y2="40"/></g>
+            <!-- scale-up event bands -->
+            <rect x="120" y="0" width="2" height="60" fill="#3c3c3c"/>
+            <rect x="220" y="0" width="2" height="60" fill="#3c3c3c"/>
+            <path d="M0,55 L40,50 L80,30 L120,8 L160,12 L200,18 L240,24 L280,30 L320,36 L360,40 L400,42 L400,60 L0,60 Z"
+                  fill="rgba(79,193,255,0.15)" stroke="none"/>
+            <path d="M0,55 L40,50 L80,30 L120,8 L160,12 L200,18 L240,24 L280,30 L320,36 L360,40 L400,42"
+                  fill="none" stroke="#4fc1ff" stroke-width="1.5"/>
+          </svg>
+        </div>
+        <div class="spark">
+          <div class="h"><span>throughput · req/s</span><b>82 r/s</b></div>
+          <svg viewBox="0 0 400 60" preserveAspectRatio="none">
+            <g stroke="#2b2b2b" stroke-width="1"><line x1="0" y1="20" x2="400" y2="20"/><line x1="0" y1="40" x2="400" y2="40"/></g>
+            <rect x="120" y="0" width="2" height="60" fill="#3c3c3c"/>
+            <rect x="220" y="0" width="2" height="60" fill="#3c3c3c"/>
+            <path d="M0,52 L40,50 L80,46 L120,44 L160,36 L200,30 L240,26 L280,22 L320,20 L360,18 L400,16"
+                  fill="none" stroke="#89d185" stroke-width="1.5"/>
+          </svg>
+        </div>
+      </div>
+    </section>
+
+    <!-- scaling timeline -->
+    <section class="panel">
+      <div class="panel-head">
+        <span class="title">VM lifecycle · 18 nodes · 최근 15분</span>
+        <span class="meta">정렬: 시작 시각</span>
+      </div>
+      <div class="tl-wrap">
+        <div class="tl-axis">
+          <div class="empty"></div>
+          <div class="ticks">
+            <span style="left: 0%;">-15m</span>
+            <span style="left: 25%;">-11m</span>
+            <span style="left: 50%;">-7m</span>
+            <span style="left: 75%;">-3m</span>
+            <span style="left: 100%;">now</span>
+          </div>
+        </div>
+
+        <!-- node rows: width % of 100 = 15min, every minute = 6.67% -->
+
+        <div class="tl-row">
+          <div class="tl-meta"><span class="id">vm-kr-a01</span><span class="sub">koreacentral · DASv5</span></div>
+          <div class="tl-track">
+            <div class="seg prov"   style="left: 0%;  width: 9%;"><span class="lbl">prov 80s</span></div>
+            <div class="seg ready"  style="left: 9%;  width: 8%;"><span class="lbl">ready</span></div>
+            <div class="seg run"    style="left: 17%; width: 83%;"><span class="lbl">running · 4 batches</span></div>
+            <div class="now" style="left: 100%;"></div>
+          </div>
+        </div>
+
+        <div class="tl-row">
+          <div class="tl-meta"><span class="id">vm-kr-a02</span><span class="sub">koreacentral · DASv5</span></div>
+          <div class="tl-track">
+            <div class="seg prov"  style="left: 0%; width: 10%;"><span class="lbl">prov 90s</span></div>
+            <div class="seg ready" style="left: 10%; width: 90%;"><span class="lbl">ready</span></div>
+            <div class="now" style="left: 100%;"></div>
+          </div>
+        </div>
+
+        <div class="tl-row">
+          <div class="tl-meta"><span class="id">vm-eu-w01</span><span class="sub">westeurope · DASv5</span></div>
+          <div class="tl-track">
+            <div class="seg ready" style="left: 0%; width: 18%;"><span class="lbl">ready</span></div>
+            <div class="seg run"   style="left: 18%; width: 82%;"><span class="lbl">running</span></div>
+            <div class="now" style="left: 100%;"></div>
+          </div>
+        </div>
+
+        <div class="tl-row">
+          <div class="tl-meta"><span class="id">vm-eu-n07</span><span class="sub">northeurope · DASv5</span></div>
+          <div class="tl-track">
+            <div class="seg run"   style="left: 0%;  width: 56%;"><span class="lbl">running</span></div>
+            <div class="seg drain" style="left: 56%; width: 14%;"><span class="lbl">drain (evicted)</span></div>
+            <div class="seg term"  style="left: 70%; width: 5%;"><span class="lbl">term</span></div>
+            <div class="now" style="left: 100%;"></div>
+          </div>
+        </div>
+
+        <div class="tl-row">
+          <div class="tl-meta"><span class="id">vm-us-e03</span><span class="sub">eastus · DASv5</span></div>
+          <div class="tl-track">
+            <div class="seg ready" style="left: 0%; width: 100%;"><span class="lbl">ready (warm)</span></div>
+            <div class="now" style="left: 100%;"></div>
+          </div>
+        </div>
+
+        <div class="tl-row">
+          <div class="tl-meta"><span class="id">vm-jp-e10</span><span class="sub">japaneast · DASv5</span></div>
+          <div class="tl-track">
+            <div class="seg prov" style="left: 75%; width: 25%;"><span class="lbl">prov 75s / est 90s</span></div>
+            <div class="now" style="left: 100%;"></div>
+          </div>
+        </div>
+
+        <div class="tl-row">
+          <div class="tl-meta"><span class="id">vm-jp-e11</span><span class="sub">japaneast · DASv5</span></div>
+          <div class="tl-track">
+            <div class="seg prov" style="left: 78%; width: 22%;"><span class="lbl">prov 65s / est 90s</span></div>
+            <div class="now" style="left: 100%;"></div>
+          </div>
+        </div>
+
+        <div class="tl-row">
+          <div class="tl-meta"><span class="id">vm-au-e02</span><span class="sub">australiaeast · DASv5</span></div>
+          <div class="tl-track">
+            <div class="seg ready" style="left: 0%; width: 100%;"><span class="lbl">ready</span></div>
+            <div class="now" style="left: 100%;"></div>
+          </div>
+        </div>
+
+        <div class="tl-row">
+          <div class="tl-meta"><span class="id">vm-za-n01</span><span class="sub">southafricanorth · DASv5</span></div>
+          <div class="tl-track">
+            <div class="seg fail" style="left: 30%; width: 8%;"><span class="lbl">QuotaExceeded</span></div>
+            <div class="now" style="left: 100%;"></div>
+          </div>
+        </div>
+
+        <div class="tl-row">
+          <div class="tl-meta"><span class="id">vm-us-w12</span><span class="sub">westus2 · DASv5</span></div>
+          <div class="tl-track">
+            <div class="seg prov" style="left: 85%; width: 15%;"><span class="lbl">prov 50s / est 80s</span></div>
+            <div class="now" style="left: 100%;"></div>
+          </div>
+        </div>
+
+        <div class="tl-row">
+          <div class="tl-meta"><span class="id">vm-br-s04</span><span class="sub">brazilsouth · DASv5</span></div>
+          <div class="tl-track">
+            <div class="seg prov" style="left: 82%; width: 18%;"><span class="lbl">prov 60s / est 95s</span></div>
+            <div class="now" style="left: 100%;"></div>
+          </div>
+        </div>
+
+        <div class="tl-row">
+          <div class="tl-meta"><span class="id">vm-kr-a03</span><span class="sub">koreacentral · DASv5</span></div>
+          <div class="tl-track">
+            <div class="seg run"   style="left: 0%;  width: 70%;"><span class="lbl">running</span></div>
+            <div class="seg drain" style="left: 70%; width: 22%;"><span class="lbl">drain (idle 600s)</span></div>
+            <div class="seg term"  style="left: 92%; width: 4%;"><span class="lbl">term</span></div>
+            <div class="now" style="left: 100%;"></div>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="tl-legend">
+        <span class="lg-prov">provisioning</span>
+        <span class="lg-ready">ready</span>
+        <span class="lg-run">running</span>
+        <span class="lg-drain">disallocating</span>
+        <span class="lg-fail">failed / quota</span>
+        <span class="lg-term">terminated</span>
+      </div>
+    </section>
+
+    <!-- batches summary -->
+    <section class="panel">
+      <div class="panel-head">
+        <span class="title">현재 처리 중인 배치 · 4 / 7</span>
+        <span class="meta">전체 보기 →</span>
+      </div>
+      <table class="batches">
+        <thead>
+          <tr>
+            <th style="width: 24%;">배치</th>
+            <th>요청 수</th>
+            <th>진행</th>
+            <th>처리율</th>
+            <th>ETA</th>
+            <th>workers</th>
+            <th>상태</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="name">batch_a91c <span style="color:var(--text-muted); font-size:11px;">· pubmed</span></td>
+            <td>4,820</td>
+            <td><div class="prog"><div class="meter"><span style="width:64%;"></span></div><span class="pct">64%</span></div></td>
+            <td>38 r/s</td>
+            <td>~ 14m</td>
+            <td>32</td>
+            <td><span class="tag run">running</span></td>
+          </tr>
+          <tr>
+            <td class="name">batch_77ef <span style="color:var(--text-muted); font-size:11px;">· arxiv</span></td>
+            <td>1,200</td>
+            <td><div class="prog"><div class="meter"><span style="width:22%;"></span></div><span class="pct">22%</span></div></td>
+            <td>12 r/s</td>
+            <td>~ 78m</td>
+            <td>12</td>
+            <td><span class="tag run">running</span></td>
+          </tr>
+          <tr>
+            <td class="name">batch_5b22 <span style="color:var(--text-muted); font-size:11px;">· who-icd</span></td>
+            <td>620</td>
+            <td><div class="prog"><div class="meter warn"><span style="width:8%;"></span></div><span class="pct">8%</span></div></td>
+            <td>0 r/s</td>
+            <td>auto-resume 6m</td>
+            <td>0</td>
+            <td><span class="tag paused">paused</span></td>
+          </tr>
+          <tr>
+            <td class="name">batch_0d11 <span style="color:var(--text-muted); font-size:11px;">· cdc-feed</span></td>
+            <td>3,400</td>
+            <td><div class="prog"><div class="meter info"><span style="width:0%;"></span></div><span class="pct">0%</span></div></td>
+            <td>—</td>
+            <td>대기 ~14m</td>
+            <td>—</td>
+            <td><span class="tag queued">queued</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+  </main>
+
+  <div class="statusbar">
+    <span class="seg-s">⎈ pool: 38 / 64</span>
+    <span class="seg-s">⇅ 82 req/s</span>
+    <span class="seg-s">backlog 9,684</span>
+    <span class="seg-s">cold start p95 142s</span>
+    <span class="seg-s" style="margin-left:auto;">last sweep 2m ago · next 23h 58m</span>
+  </div>
+</div>
+</body>
+</html>

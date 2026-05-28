@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# rapid-evidence runtime artifacts
+.rapid-evidence/

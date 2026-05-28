@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>rapid-evidence — 시안 3: Queue-First</title>
+<style>
+  :root {
+    --text: #f5f6fb;
+    --muted: rgba(245, 246, 251, 0.6);
+    --glass: rgba(255, 255, 255, 0.055);
+    --glass-strong: rgba(255, 255, 255, 0.10);
+    --border: rgba(255, 255, 255, 0.14);
+    --accent: #fb7185;
+    --accent-2: #f59e0b;
+    --ok: #34d399;
+    --warn: #fbbf24;
+    --bad: #f87171;
+    --info: #60a5fa;
+    --violet: #c084fc;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body {
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Pretendard", Roboto, sans-serif;
+    font-size: 14px; line-height: 1.5;
+    background:
+      radial-gradient(700px 500px at 100% 0%, rgba(251, 113, 133, 0.20), transparent 55%),
+      radial-gradient(700px 500px at 0% 100%, rgba(245, 158, 11, 0.18), transparent 55%),
+      radial-gradient(900px 600px at 50% 50%, rgba(96, 165, 250, 0.10), transparent 60%),
+      linear-gradient(170deg, #0a0d23, #161331 50%, #2a0f44);
+    background-attachment: fixed; min-height: 100vh;
+  }
+  .glass {
+    background: var(--glass);
+    backdrop-filter: blur(22px) saturate(140%);
+    -webkit-backdrop-filter: blur(22px) saturate(140%);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    box-shadow: 0 12px 44px rgba(8, 10, 30, 0.45);
+  }
+  .shell { display: grid; grid-template-columns: 340px 1fr; min-height: 100vh; gap: 18px; padding: 18px; }
+  header.top {
+    grid-column: 1 / 3;
+    padding: 14px 22px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  header.top h1 { margin: 0; font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  header.top h1 .pulse {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    box-shadow: 0 0 12px var(--accent);
+  }
+  .pill { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--glass); font-size: 12px; color: var(--muted); }
+  .pill.live { color: var(--ok); }
+  .pill.live::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 8px var(--ok); margin-right: 6px; vertical-align: middle; }
+  .btn { padding: 8px 16px; border-radius: 12px; border: 1px solid var(--border); background: linear-gradient(120deg, var(--accent), var(--accent-2)); color: #1a0820; font-weight: 700; cursor: pointer; font-size: 13px; }
+  .btn.ghost { background: var(--glass); color: var(--text); font-weight: 500; }
+
+  /* sidebar: pool overview */
+  aside.pool { padding: 18px; display: flex; flex-direction: column; gap: 14px; }
+  aside.pool h3 { margin: 0; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+
+  /* big donut */
+  .pool-cap { display: grid; grid-template-columns: 130px 1fr; gap: 14px; align-items: center; }
+  .donut {
+    width: 130px; height: 130px; border-radius: 50%; position: relative;
+    background:
+      conic-gradient(
+        var(--violet) 0 11%,
+        var(--ok)    11% 27%,
+        var(--info)  27% 34%,
+        var(--warn)  34% 37%,
+        rgba(255,255,255,0.10) 37% 100%
+      );
+    display: grid; place-items: center;
+  }
+  .donut::before {
+    content: ""; position: absolute; inset: 14px; border-radius: 50%;
+    background: linear-gradient(160deg, rgba(8,10,30,0.85), rgba(42,15,68,0.85));
+    border: 1px solid var(--border);
+  }
+  .donut .center {
+    position: relative; text-align: center; z-index: 1;
+  }
+  .donut .center .big { font-size: 24px; font-weight: 700; }
+  .donut .center .sm { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+  .pool-legend { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+  .pool-legend .item { display: flex; align-items: center; gap: 8px; }
+  .pool-legend .sw { width: 10px; height: 10px; border-radius: 3px; }
+  .l-ready { background: var(--ok); }
+  .l-run   { background: var(--violet); }
+  .l-prov  { background: var(--info); }
+  .l-drain { background: var(--warn); }
+  .pool-legend .item b { font-variant-numeric: tabular-nums; margin-left: auto; }
+
+  .pool-totals { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .pool-totals .cell { padding: 10px 12px; background: var(--glass); border: 1px solid var(--border); border-radius: 12px; }
+  .pool-totals .cell .l { color: var(--muted); font-size: 11px; }
+  .pool-totals .cell .v { font-size: 18px; font-weight: 700; margin-top: 2px; }
+
+  /* mini region list */
+  .region-list { display: flex; flex-direction: column; gap: 6px; }
+  .rrow {
+    display: grid; grid-template-columns: 14px 1fr auto; align-items: center;
+    gap: 10px; padding: 8px 10px; border-radius: 10px;
+    background: var(--glass); border: 1px solid var(--border);
+    font-size: 12px;
+  }
+  .rrow .pin { width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 8px currentColor; }
+  .rrow .pin.ok   { background: var(--ok);    color: var(--ok); }
+  .rrow .pin.run  { background: var(--violet);color: var(--violet); }
+  .rrow .pin.prov { background: var(--info);  color: var(--info); }
+  .rrow .pin.warn { background: var(--warn);  color: var(--warn); }
+  .rrow .pin.bad  { background: var(--bad);   color: var(--bad); }
+  .rrow .right { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 11px; }
+
+  .more { text-align: center; font-size: 12px; color: var(--muted); padding: 6px; border: 1px dashed var(--border); border-radius: 10px; cursor: pointer; }
+  .more:hover { color: var(--text); background: var(--glass); }
+
+  /* main */
+  main { display: flex; flex-direction: column; gap: 18px; }
+  .toolbar {
+    padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  }
+  .toolbar .left { display: flex; gap: 10px; align-items: center; }
+  .tab {
+    padding: 8px 14px; border-radius: 999px; font-size: 13px; cursor: pointer;
+    background: var(--glass); border: 1px solid var(--border); color: var(--muted);
+  }
+  .tab.active { background: linear-gradient(120deg, rgba(251,113,133,0.30), rgba(245,158,11,0.25)); color: var(--text); }
+  .search {
+    padding: 8px 14px; border-radius: 12px; border: 1px solid var(--border);
+    background: var(--glass); color: var(--text); font-size: 13px; min-width: 260px;
+  }
+  .search::placeholder { color: var(--muted); }
+
+  /* kanban */
+  .kanban { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; align-items: flex-start; }
+  .col { padding: 14px; display: flex; flex-direction: column; gap: 12px; min-height: 320px; }
+  .col h4 {
+    margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: 1px;
+    display: flex; justify-content: space-between; align-items: center;
+    color: var(--muted);
+  }
+  .col h4 .count {
+    background: var(--glass-strong); color: var(--text);
+    padding: 2px 8px; border-radius: 999px; font-size: 11px;
+  }
+  .col.queued h4 { color: rgba(245,246,251,0.7); }
+  .col.running h4 { color: var(--violet); }
+  .col.paused h4 { color: var(--warn); }
+  .col.done h4 { color: var(--ok); }
+
+  .job {
+    padding: 14px;
+    background: var(--glass);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .job:hover { background: var(--glass-strong); }
+  .job .jh { display: flex; justify-content: space-between; align-items: center; }
+  .job .jid { font-weight: 700; font-size: 14px; }
+  .job .src { color: var(--muted); font-size: 11px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 10px; font-weight: 700; border: 1px solid var(--border); }
+  .b-run    { color: var(--violet); border-color: rgba(192,132,252,0.4); }
+  .b-pause  { color: var(--warn);   border-color: rgba(251,191,36,0.4); }
+  .b-done   { color: var(--ok);     border-color: rgba(52,211,153,0.4); }
+  .b-queue  { color: var(--muted); }
+
+  .job .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; font-size: 11px; color: var(--muted); }
+  .job .stats b { color: var(--text); font-variant-numeric: tabular-nums; }
+  .bar { height: 8px; background: rgba(255,255,255,0.08); border-radius: 999px; overflow: hidden; }
+  .bar > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+  .bar.violet > span { background: linear-gradient(90deg, var(--violet), var(--info)); }
+  .bar.warn > span   { background: linear-gradient(90deg, var(--warn), var(--bad)); }
+  .bar.ok > span     { background: linear-gradient(90deg, var(--ok), #22d3ee); }
+
+  .eta-line { display: flex; justify-content: space-between; font-size: 12px; }
+  .eta-line .pct { font-weight: 700; }
+  .eta-line .eta { color: var(--muted); }
+
+  .worker-strip { display: flex; gap: 4px; flex-wrap: wrap; }
+  .worker-strip .w {
+    width: 14px; height: 14px; border-radius: 4px; background: rgba(255,255,255,0.10);
+    border: 1px solid var(--border);
+  }
+  .w.run   { background: var(--violet); border-color: transparent; box-shadow: 0 0 8px rgba(192,132,252,0.6); }
+  .w.idle  { background: var(--ok);     border-color: transparent; }
+  .w.prov  { background: var(--info);   border-color: transparent; animation: pulse 1.4s infinite; }
+  .w.fail  { background: var(--bad);    border-color: transparent; }
+  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.4;} }
+
+  .job .row-actions { display: flex; gap: 6px; }
+  .icon-btn {
+    background: transparent; border: 1px solid var(--border); color: var(--muted);
+    padding: 4px 10px; border-radius: 8px; cursor: pointer; font-size: 11px;
+  }
+  .icon-btn:hover { color: var(--text); background: var(--glass-strong); }
+
+  .add-job {
+    padding: 14px; text-align: center; font-size: 12px; color: var(--muted);
+    border: 1px dashed var(--border); border-radius: 12px; cursor: pointer;
+  }
+  .add-job:hover { color: var(--text); background: var(--glass); }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <header class="top glass">
+    <h1><span class="pulse"></span> rapid-evidence — 큐 운영 콘솔</h1>
+    <div style="display:flex; gap:10px; align-items:center;">
+      <span class="pill live">/pool/status & /batches LIVE</span>
+      <span class="pill">17 regions · 38 VMs · 142 가용</span>
+      <button class="btn ghost">⟳ Quota sweep</button>
+      <button class="btn">＋ 새 배치 실행</button>
+    </div>
+  </header>
+
+  <!-- sidebar -->
+  <aside class="pool glass">
+    <div>
+      <h3>Spot Pool 요약</h3>
+      <div class="pool-cap" style="margin-top:10px;">
+        <div class="donut" aria-hidden="true">
+          <div class="center">
+            <div class="big">38</div>
+            <div class="sm">active VMs</div>
+          </div>
+        </div>
+        <div class="pool-legend">
+          <div class="item"><span class="sw l-ready"></span> ready <b>21</b></div>
+          <div class="item"><span class="sw l-run"></span> running <b>14</b></div>
+          <div class="item"><span class="sw l-prov"></span> provisioning <b>9</b></div>
+          <div class="item"><span class="sw l-drain"></span> disallocating <b>4</b></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pool-totals">
+      <div class="cell"><div class="l">할당 가능</div><div class="v">142</div></div>
+      <div class="cell"><div class="l">총 한도</div><div class="v">256</div></div>
+      <div class="cell"><div class="l">최근 1h 처리율</div><div class="v">82 req/s</div></div>
+      <div class="cell"><div class="l">시간당 비용</div><div class="v">$4.82</div></div>
+    </div>
+
+    <div>
+      <h3 style="margin-bottom:8px;">리전 상태</h3>
+      <div class="region-list">
+        <div class="rrow"><span class="pin run"></span><span>koreacentral</span><span class="right">8 VM · 18/32</span></div>
+        <div class="rrow"><span class="pin ok"></span><span>eastus</span><span class="right">8 VM · 12/40</span></div>
+        <div class="rrow"><span class="pin warn"></span><span>westeurope</span><span class="right">6 VM · 22/32</span></div>
+        <div class="rrow"><span class="pin prov"></span><span>japaneast</span><span class="right">4 VM · 8/16</span></div>
+        <div class="rrow"><span class="pin warn"></span><span>northeurope</span><span class="right">2 VM · drain</span></div>
+        <div class="rrow"><span class="pin ok"></span><span>australiaeast</span><span class="right">4 VM · 14/16</span></div>
+        <div class="rrow"><span class="pin bad"></span><span>southafricanorth</span><span class="right">0 VM · 8/8 ⚠</span></div>
+      </div>
+      <div class="more" style="margin-top:8px;">＋ 10개 region 더 보기</div>
+    </div>
+
+    <div style="font-size:11px; color: var(--muted); margin-top: auto; border-top: 1px solid var(--border); padding-top: 10px;">
+      마지막 quota sweep: <b style="color: var(--text);">2분 전</b><br/>
+      다음 자동 조사: 23h 58m 후 · 24h 주기
+    </div>
+  </aside>
+
+  <!-- main -->
+  <main>
+    <div class="toolbar glass">
+      <div class="left">
+        <div class="tab active">All · 11</div>
+        <div class="tab">Running · 2</div>
+        <div class="tab">Queued · 4</div>
+        <div class="tab">Paused · 1</div>
+        <div class="tab">Done (24h) · 4</div>
+      </div>
+      <input class="search" placeholder="batch_id / source / metadata 검색" />
+    </div>
+
+    <section class="kanban">
+
+      <!-- Queued -->
+      <div class="col glass queued">
+        <h4>QUEUED <span class="count">4</span></h4>
+
+        <div class="job">
+          <div class="jh">
+            <div>
+              <div class="jid">batch_0d11</div>
+              <div class="src">cdc-feed · 3,400 reqs</div>
+            </div>
+            <span class="badge b-queue">queued</span>
+          </div>
+          <div class="stats">
+            <div>요청 수 <b>3,400</b></div>
+            <div>우선순위 <b>P2</b></div>
+            <div>예상 비용 <b>$0.42</b></div>
+            <div>예상 시작 <b>~14m</b></div>
+          </div>
+          <div class="row-actions">
+            <button class="icon-btn">▶ 즉시 실행</button>
+            <button class="icon-btn">✕</button>
+          </div>
+        </div>
+
+        <div class="job">
+          <div class="jh">
+            <div>
+              <div class="jid">batch_2f04</div>
+              <div class="src">openalex · 9,820 reqs</div>
+            </div>
+            <span class="badge b-queue">queued</span>
+          </div>
+          <div class="stats">
+            <div>요청 수 <b>9,820</b></div>
+            <div>우선순위 <b>P3</b></div>
+            <div>예상 비용 <b>$1.18</b></div>
+            <div>예상 시작 <b>~32m</b></div>
+          </div>
+          <div class="row-actions">
+            <button class="icon-btn">▶</button>
+            <button class="icon-btn">✕</button>
+          </div>
+        </div>
+
+        <div class="add-job">＋ 새 배치 등록</div>
+      </div>
+
+      <!-- Running -->
+      <div class="col glass running">
+        <h4>RUNNING <span class="count">2</span></h4>
+
+        <div class="job">
+          <div class="jh">
+            <div>
+              <div class="jid">batch_a91c</div>
+              <div class="src">pubmed · 32 workers</div>
+            </div>
+            <span class="badge b-run">running</span>
+          </div>
+          <div class="bar violet"><span style="width:64%;"></span></div>
+          <div class="eta-line">
+            <span class="pct">64% · 3,084 / 4,820</span>
+            <span class="eta">ETA ~14m</span>
+          </div>
+          <div class="stats">
+            <div>처리율 <b>38 req/s</b></div>
+            <div>실패율 <b>0.4%</b></div>
+            <div>리전 <b>kr, eu, us</b></div>
+            <div>비용(현재) <b>$1.92</b></div>
+          </div>
+          <div class="worker-strip" title="worker 슬롯 상태">
+            <span class="w run"></span><span class="w run"></span><span class="w run"></span>
+            <span class="w run"></span><span class="w run"></span><span class="w run"></span>
+            <span class="w idle"></span><span class="w idle"></span>
+            <span class="w prov"></span><span class="w prov"></span>
+            <span class="w fail"></span>
+          </div>
+          <div class="row-actions">
+            <button class="icon-btn">⏸ 일시중지</button>
+            <button class="icon-btn">✕ 취소</button>
+            <button class="icon-btn">상세</button>
+          </div>
+        </div>
+
+        <div class="job">
+          <div class="jh">
+            <div>
+              <div class="jid">batch_77ef</div>
+              <div class="src">arxiv · 12 workers</div>
+            </div>
+            <span class="badge b-run">running</span>
+          </div>
+          <div class="bar violet"><span style="width:22%;"></span></div>
+          <div class="eta-line">
+            <span class="pct">22% · 264 / 1,200</span>
+            <span class="eta">ETA ~78m</span>
+          </div>
+          <div class="stats">
+            <div>처리율 <b>12 req/s</b></div>
+            <div>실패율 <b>1.1%</b></div>
+            <div>리전 <b>jp, us</b></div>
+            <div>비용(현재) <b>$0.34</b></div>
+          </div>
+          <div class="worker-strip">
+            <span class="w run"></span><span class="w run"></span><span class="w run"></span>
+            <span class="w run"></span><span class="w idle"></span><span class="w idle"></span>
+          </div>
+          <div class="row-actions">
+            <button class="icon-btn">⏸</button>
+            <button class="icon-btn">✕</button>
+            <button class="icon-btn">상세</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Paused -->
+      <div class="col glass paused">
+        <h4>PAUSED <span class="count">1</span></h4>
+
+        <div class="job">
+          <div class="jh">
+            <div>
+              <div class="jid">batch_5b22</div>
+              <div class="src">who-icd · rate-limit hit</div>
+            </div>
+            <span class="badge b-pause">paused</span>
+          </div>
+          <div class="bar warn"><span style="width:8%;"></span></div>
+          <div class="eta-line">
+            <span class="pct">8% · 50 / 620</span>
+            <span class="eta">자동 재개 ~6m 후</span>
+          </div>
+          <div class="stats">
+            <div>처리율 <b>0 req/s</b></div>
+            <div>마지막 에러 <b>429</b></div>
+            <div>Retry-After <b>360s</b></div>
+            <div>리전 <b>eu</b></div>
+          </div>
+          <div class="row-actions">
+            <button class="icon-btn">▶ 지금 재개</button>
+            <button class="icon-btn">✕ 취소</button>
+            <button class="icon-btn">로그</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Done -->
+      <div class="col glass done">
+        <h4>DONE (24h) <span class="count">4</span></h4>
+
+        <div class="job">
+          <div class="jh">
+            <div>
+              <div class="jid">batch_4c1a</div>
+              <div class="src">pubmed · 1,000 reqs</div>
+            </div>
+            <span class="badge b-done">done</span>
+          </div>
+          <div class="bar ok"><span style="width:100%;"></span></div>
+          <div class="eta-line">
+            <span class="pct">100% · 1,000 / 1,000</span>
+            <span class="eta">소요 22m</span>
+          </div>
+          <div class="stats">
+            <div>처리율 평균 <b>45 req/s</b></div>
+            <div>실패율 <b>0.0%</b></div>
+            <div>비용 <b>$0.51</b></div>
+            <div>결과 <b>1,000 file</b></div>
+          </div>
+        </div>
+
+        <div class="job">
+          <div class="jh">
+            <div>
+              <div class="jid">batch_3a99</div>
+              <div class="src">arxiv · 500 reqs</div>
+            </div>
+            <span class="badge b-done">done</span>
+          </div>
+          <div class="bar ok"><span style="width:100%;"></span></div>
+          <div class="eta-line">
+            <span class="pct">100% · 500 / 500</span>
+            <span class="eta">소요 9m</span>
+          </div>
+          <div class="stats">
+            <div>처리율 <b>56 req/s</b></div>
+            <div>실패율 <b>0.2%</b></div>
+            <div>비용 <b>$0.22</b></div>
+            <div>결과 <b>499 file</b></div>
+          </div>
+        </div>
+      </div>
+
+    </section>
+  </main>
+
+</div>
+</body>
+</html>

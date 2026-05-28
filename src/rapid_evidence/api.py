@@ -7,9 +7,12 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from rapid_evidence.batches import BatchExecutor, BatchRegistry
 from rapid_evidence.core.models import FetchRequest
+from rapid_evidence.metrics import MetricsCollector
+from rapid_evidence.metrics.collector import build_metric_sample
 from rapid_evidence.orchestrator.scheduler import SurgeOrchestrator
 from rapid_evidence.policy.defaults import default_policy_store
 from rapid_evidence.providers.local import LocalWorkerProvider
@@ -17,8 +20,9 @@ from rapid_evidence.queue.memory import MemoryRequestQueue
 from rapid_evidence.sources.generic_http import GenericHttpSource
 from rapid_evidence.spot.fake import InMemorySpotVmProvider
 from rapid_evidence.spot.manager import SpotPoolManager
-from rapid_evidence.spot.models import SpotPoolConfig
+from rapid_evidence.spot.models import SpotNodeState, SpotPoolConfig
 from rapid_evidence.spot.scheduler import SpotVmScheduler
+from rapid_evidence.spot.sizing import estimate_spot_capacity
 from rapid_evidence.storage.filesystem import FileSystemResultSink
 
 
@@ -89,6 +93,45 @@ def build_pool_manager() -> SpotPoolManager:
     )
 
 
+def default_source_client_factory(source: str) -> Any:
+    """Build a source client for the batch executor.
+
+    Defaults to GenericHttpSource governed by the registered policy. Tests
+    monkeypatch this to return a fake client that does not perform real HTTP.
+    """
+    policy = default_policy_store().require(source)
+    return GenericHttpSource(
+        max_body_bytes=policy.max_request_bytes,
+        timeout_seconds=_env_float("RAPID_EVIDENCE_FETCH_TIMEOUT_SECONDS", 30.0),
+        max_attempts=policy.max_attempts,
+    )
+
+
+def default_result_sink() -> FileSystemResultSink:
+    return FileSystemResultSink(
+        os.environ.get("RAPID_EVIDENCE_RESULT_DIR", ".rapid-evidence")
+    )
+
+
+def build_batch_registry(
+    *,
+    source_client_factory=None,
+    sink_factory=None,
+    default_workers: int | None = None,
+) -> BatchRegistry:
+    # Resolve through the module globals so tests can monkeypatch the
+    # default factory after import.
+    factory = source_client_factory or default_source_client_factory
+    sink_builder = sink_factory or default_result_sink
+    sink = sink_builder()
+    workers = default_workers or _env_int("RAPID_EVIDENCE_BATCH_WORKERS", 4)
+
+    def executor_factory(source: str) -> BatchExecutor:
+        return BatchExecutor(source_client=factory(source), sink=sink)
+
+    return BatchRegistry(executor_factory=executor_factory, default_workers=workers)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     autostart = _env_bool("RAPID_EVIDENCE_POOL_AUTOSTART", True)
@@ -101,11 +144,38 @@ async def lifespan(app: FastAPI):
             await manager.stop()
             raise
     app.state.pool_manager = manager
+
+    registry = build_batch_registry()
+    app.state.batch_registry = registry
+
+    def _snapshot() -> Any:
+        counters: dict[str, int] = {}
+        if manager is not None and manager.running:
+            counters = manager.snapshot().get("counters", {})
+        return build_metric_sample(
+            backlog=registry.backlog(),
+            throughput_per_second=registry.aggregate_throughput_per_second(),
+            counters=counters,
+            active_batches=registry.active_batch_count(),
+        )
+
+    collector = MetricsCollector(
+        snapshot=_snapshot,
+        sample_interval_seconds=_env_float("RAPID_EVIDENCE_METRICS_INTERVAL_SECONDS", 5.0),
+        retention_seconds=_env_float("RAPID_EVIDENCE_METRICS_RETENTION_SECONDS", 3600.0),
+    )
+    await collector.start()
+    app.state.metrics_collector = collector
+
     try:
         yield
     finally:
+        await collector.stop()
+        await registry.stop_all()
         if manager is not None:
             await manager.stop()
+        app.state.metrics_collector = None
+        app.state.batch_registry = None
         app.state.pool_manager = None
 
 
@@ -291,3 +361,160 @@ async def pool_reconcile(request: Request):
         raise HTTPException(status_code=503, detail="pool manager not running")
     result = await manager.reconcile_once()
     return {"result": result, "snapshot": manager.snapshot()}
+
+
+# ----- batches -----------------------------------------------------------
+
+
+class BatchCreateRequest(BaseModel):
+    source: str = "generic-http"
+    targets: list[str] = Field(default_factory=list)
+    workers: int | None = None
+    headers: dict[str, str] | None = None
+    metadata: dict[str, Any] | None = None
+
+
+def _require_registry(request: Request) -> BatchRegistry:
+    registry: BatchRegistry | None = getattr(request.app.state, "batch_registry", None)
+    if registry is None:
+        raise HTTPException(status_code=503, detail="batch registry not running")
+    return registry
+
+
+@app.post("/batches", status_code=201)
+async def create_batch(payload: BatchCreateRequest, request: Request):
+    registry = _require_registry(request)
+    targets = [t for t in payload.targets if t and t.strip()]
+    if not targets:
+        raise HTTPException(status_code=422, detail="targets must not be empty")
+    try:
+        record = await registry.submit(
+            source=payload.source,
+            targets=targets,
+            workers=payload.workers,
+            headers=payload.headers,
+            metadata=payload.metadata,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return record.progress().to_dict()
+
+
+@app.get("/batches")
+def list_batches(request: Request):
+    registry = _require_registry(request)
+    return {"batches": [p.to_dict() for p in registry.list_progress()]}
+
+
+@app.get("/batches/{batch_id}")
+def get_batch(batch_id: str, request: Request):
+    registry = _require_registry(request)
+    progress = registry.progress(batch_id)
+    if progress is None:
+        raise HTTPException(status_code=404, detail="batch not found")
+    return progress.to_dict()
+
+
+@app.post("/batches/{batch_id}/cancel")
+async def cancel_batch(batch_id: str, request: Request):
+    registry = _require_registry(request)
+    progress = await registry.cancel(batch_id)
+    if progress is None:
+        raise HTTPException(status_code=404, detail="batch not found")
+    return progress.to_dict()
+
+
+# ----- metrics -----------------------------------------------------------
+
+
+@app.get("/metrics/timeseries")
+def metrics_timeseries(request: Request, window_seconds: float | None = None):
+    collector: MetricsCollector | None = getattr(
+        request.app.state, "metrics_collector", None
+    )
+    if collector is None:
+        raise HTTPException(status_code=503, detail="metrics collector not running")
+    samples = collector.query(window_seconds)
+    return {
+        "window_seconds": window_seconds,
+        "sample_interval_seconds": collector.sample_interval_seconds,
+        "retention_seconds": collector.retention_seconds,
+        "samples": [s.to_dict() for s in samples],
+    }
+
+
+# ----- dashboard summary -------------------------------------------------
+
+
+def _compute_scale_up_target(
+    manager: SpotPoolManager | None, backlog: int
+) -> dict[str, int] | None:
+    if manager is None or not manager.running:
+        return None
+    config = manager.scheduler.config
+    nodes = manager.scheduler._nodes.values()
+    ready_nodes = sum(1 for n in nodes if n.ready)
+    active_nodes = sum(
+        1
+        for n in nodes
+        if n.state
+        in {
+            SpotNodeState.READY,
+            SpotNodeState.BUSY,
+            SpotNodeState.PROVISIONING,
+            SpotNodeState.DRAINING,
+        }
+    )
+    plan = estimate_spot_capacity(
+        config, max(0, backlog), ready_nodes, active_nodes, {}
+    )
+    return {
+        "target_nodes": plan.target_nodes,
+        "scale_up_nodes": plan.scale_up_nodes,
+        "scale_down_nodes": plan.scale_down_nodes,
+        "immediate_tasks": plan.immediate_tasks,
+        "queued_tasks": plan.queued_tasks,
+        "overflow_tasks": plan.overflow_tasks,
+    }
+
+
+@app.get("/dashboard/summary")
+def dashboard_summary(request: Request):
+    registry = _require_registry(request)
+    manager: SpotPoolManager | None = getattr(request.app.state, "pool_manager", None)
+    collector: MetricsCollector | None = getattr(
+        request.app.state, "metrics_collector", None
+    )
+
+    backlog = registry.backlog()
+    throughput = registry.aggregate_throughput_per_second()
+    drain_eta = registry.drain_eta_seconds()
+    active_batches = registry.active_batch_count()
+
+    pool_block: dict[str, Any] = {"running": False}
+    if manager is not None and manager.running:
+        snap = manager.snapshot()
+        pool_block = {
+            "running": True,
+            "provider": snap.get("provider"),
+            "config": snap.get("config"),
+            "counters": snap.get("counters"),
+            "metrics": snap.get("metrics"),
+        }
+
+    latest = collector.latest() if collector is not None else None
+
+    return {
+        "backlog": backlog,
+        "throughput_per_second": round(throughput, 3),
+        "drain_eta_seconds": (
+            round(drain_eta, 1) if drain_eta is not None else None
+        ),
+        "active_batches": active_batches,
+        "pool": pool_block,
+        "scale_target": _compute_scale_up_target(manager, backlog),
+        "latest_sample": latest.to_dict() if latest is not None else None,
+        "sample_interval_seconds": (
+            collector.sample_interval_seconds if collector is not None else None
+        ),
+    }
