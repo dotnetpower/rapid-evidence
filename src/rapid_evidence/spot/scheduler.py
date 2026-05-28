@@ -1,4 +1,3 @@
-from rapid_evidence.spot.fake import InMemorySpotVmProvider
 from rapid_evidence.spot.models import EvictionEvent, SpotCapacityPlan, SpotNode, SpotNodeState, SpotPoolConfig, SpotReservation
 from rapid_evidence.spot.sizing import estimate_spot_capacity
 
@@ -20,8 +19,6 @@ class SpotVmScheduler:
         self.ensure_min_ready()
 
     def ensure_min_ready(self) -> None:
-        ready_nodes = [node for node in self._nodes.values() if node.state == SpotNodeState.READY]
-        target = max(self.config.min_ready, len(ready_nodes))
         if len(self._nodes) < self.config.min_ready:
             created = self.provider.create_nodes(max(0, self.config.min_ready - len(self._nodes)), self.config)
             for node in created:
@@ -42,7 +39,6 @@ class SpotVmScheduler:
                     error=node.error,
                 )
         self._nodes = {node_id: node for node_id, node in self._nodes.items() if node.state != SpotNodeState.TERMINATED}
-        target = max(self.config.min_ready, len([node for node in self._nodes.values() if node.ready]))
         if len([node for node in self._nodes.values() if node.ready]) < self.config.min_ready:
             created = self.provider.create_nodes(self.config.min_ready - len([node for node in self._nodes.values() if node.ready]), self.config)
             for node in created:
@@ -50,7 +46,6 @@ class SpotVmScheduler:
 
     def status(self, requested_tasks: int = 0) -> tuple[dict, SpotCapacityPlan]:
         ready_nodes = [node for node in self._nodes.values() if node.state == SpotNodeState.READY]
-        immediate = min(len(ready_nodes) * self.config.per_node_concurrency, requested_tasks)
         plan = estimate_spot_capacity(self.config, requested_tasks, len(ready_nodes), len(self._nodes), {})
         snapshot = {
             "nodes": [node.__dict__ for node in self._nodes.values()],

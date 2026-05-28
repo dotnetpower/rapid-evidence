@@ -201,3 +201,33 @@ def test_manager_rejects_invalid_intervals():
         SpotPoolManager(scheduler=scheduler, heartbeat_interval=0)
     with pytest.raises(ValueError):
         SpotPoolManager(scheduler=scheduler, reconcile_interval=-1)
+
+
+def test_manager_event_buffer_caps_recent_events_in_snapshot():
+    async def scenario():
+        provider, scheduler, manager = _build_manager(
+            min_ready=1, max_nodes=2, event_buffer=5
+        )
+        await manager.start(background=False)
+        try:
+            # Trigger many records (heartbeat_once records one event per call).
+            for _ in range(20):
+                await manager.heartbeat_once()
+            snap = manager.snapshot()
+            recent = snap["recent_events"]
+            assert len(recent) <= 5, (
+                f"snapshot returned {len(recent)} events, expected <= event_buffer (5)"
+            )
+        finally:
+            await manager.stop()
+
+    asyncio.run(scenario())
+
+
+def test_manager_rejects_invalid_event_buffer():
+    provider = InMemorySpotVmProvider()
+    scheduler = SpotVmScheduler(
+        provider=provider, config=SpotPoolConfig(min_ready=1, max_nodes=2)
+    )
+    with pytest.raises(ValueError):
+        SpotPoolManager(scheduler=scheduler, event_buffer=0)

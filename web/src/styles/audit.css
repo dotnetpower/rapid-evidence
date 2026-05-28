@@ -1,0 +1,108 @@
+/* Styles owned by the Audit page (AuditPage + EventRow + EventFilterBar).
+   Lives in its own file so that parallel sessions editing app.css can't
+   stomp these rules. */
+
+.event-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.event-filter-chip {
+  font-size: 11px;
+  font-family: var(--mono);
+  background: var(--bg-elev);
+  color: var(--text-muted);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  padding: 3px 10px;
+  cursor: pointer;
+  letter-spacing: 0.2px;
+}
+.event-filter-chip:hover {
+  color: var(--text-strong);
+  background: var(--bg-hover);
+}
+.event-filter-chip.on {
+  color: var(--text-strong);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.event-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.event-row {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+}
+.event-row__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+}
+.event-row__time {
+  display: inline-flex;
+  flex-direction: column;
+  line-height: 1.1;
+  min-width: 130px;
+}
+.event-row__time-rel {
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.event-row__time-abs {
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+.event-row__type {
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--bg-elev);
+  color: var(--text-strong);
+  border: 1px solid var(--border-strong);
+}
+.event-row__type--node_provisioned { color: var(--ok); border-color: var(--ok); }
+.event-row__type--node_evicted { color: var(--bad); border-color: var(--bad); }
+.event-row__type--node_replaced { color: var(--violet); border-color: var(--violet); }
+.event-row__type--scale_up { color: var(--info); border-color: var(--info); }
+.event-row__type--scale_down { color: var(--warn); border-color: var(--warn); }
+.event-row__type--heartbeat { color: var(--text-dim); border-color: var(--border-strong); }
+.event-row__toggle {
+  margin-left: auto;
+  font-size: 11px;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text-muted);
+  border-radius: 3px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.event-row__toggle:hover { color: var(--text-strong); background: var(--bg-hover); }
+.event-row__payload {
+  margin: 8px 0 0;
+  background: var(--bg-app);
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  padding: 8px 10px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text);
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}

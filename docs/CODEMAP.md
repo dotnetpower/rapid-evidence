@@ -121,8 +121,9 @@ Conventions
 | [tests/test_metrics.py](../tests/test_metrics.py) | 116 |
 | [tests/test_remote_worker.py](../tests/test_remote_worker.py) | 204 |
 | [tests/test_sources.py](../tests/test_sources.py) | 53 |
-| [tests/test_spot_pool_manager.py](../tests/test_spot_pool_manager.py) | 203 |
+| [tests/test_spot_pool_manager.py](../tests/test_spot_pool_manager.py) | 233 |
 | [tests/test_spot_scheduler.py](../tests/test_spot_scheduler.py) | 21 |
+| [tests/test_api_events_scaling.py](../tests/test_api_events_scaling.py) | 94 |
 
 Gaps to close on next test refactor:
 - `tests/test_core_and_queue.py` mixes two source modules — split into
@@ -148,11 +149,19 @@ Gaps to close on next test refactor:
 | [web/src/components/batches/BatchListTable.tsx](../web/src/components/batches/BatchListTable.tsx) | Full-page batches table (selectable rows, deep-link to drawer). |
 | [web/src/components/batches/BatchDetailDrawer.tsx](../web/src/components/batches/BatchDetailDrawer.tsx) | Right-slide drawer: summary KPIs, per-node dispatch, eviction impact, timeline, cancel. |
 | [web/src/components/batches/BatchTimelineList.tsx](../web/src/components/batches/BatchTimelineList.tsx) | Reverse-chrono timeline list (consumes `GET /batches/{id}/timeline`). |
+| [web/src/components/audit/EventFilterBar.tsx](../web/src/components/audit/EventFilterBar.tsx) | Chip-style multi-select filter over the unique `event_type`s in the audit ring buffer. |
+| [web/src/components/audit/EventRow.tsx](../web/src/components/audit/EventRow.tsx) | Audit row: relative + absolute timestamp, colour-coded type pill, on-demand payload toggle. |
+| [web/src/components/scaling/SwimlaneChart.tsx](../web/src/components/scaling/SwimlaneChart.tsx) | recharts `ComposedChart` of ready/busy/provisioning/draining VMs (stacked area) with scale-event markers. |
+| [web/src/components/scaling/EventMarkerList.tsx](../web/src/components/scaling/EventMarkerList.tsx) | Newest-first scale-events list paired with the SwimlaneChart. |
 | [web/src/components/NewBatchDialog.tsx](../web/src/components/NewBatchDialog.tsx) | New batch dialog. |
 | [web/src/components/ThroughputChart.tsx](../web/src/components/ThroughputChart.tsx) | Throughput chart. |
 | [web/src/pages/ThroughputPage.tsx](../web/src/pages/ThroughputPage.tsx) | Throughput page route. |
 | [web/src/pages/BatchesPage.tsx](../web/src/pages/BatchesPage.tsx) | Batches page route — filter/sort bar, full table, URL-driven `/batches/:batchId` detail drawer. |
+| [web/src/pages/AuditPage.tsx](../web/src/pages/AuditPage.tsx) | Audit page route. Tails `GET /events` via incremental `since=` cursor; bounded local buffer (500 events); filter chips. |
+| [web/src/pages/ScalingTimelinePage.tsx](../web/src/pages/ScalingTimelinePage.tsx) | Scaling timeline page route. Reads `GET /scaling/timeline`; 15m/60m/6h window toggle; SwimlaneChart + EventMarkerList. |
 | [web/src/test/setup.ts](../web/src/test/setup.ts) | Vitest setup hook. |
+| [web/src/styles/audit.css](../web/src/styles/audit.css) | Page-scoped styles for the Audit page (imported by `AuditPage.tsx`). Kept separate from `app.css` to avoid races with other sessions editing the shared stylesheet. |
+| [web/src/styles/scaling.css](../web/src/styles/scaling.css) | Page-scoped styles for the Scaling Timeline page (imported by `ScalingTimelinePage.tsx`). |
 | [web/src/__tests__/format.test.ts](../web/src/__tests__/format.test.ts) | Vitest suite for `lib/format`. |
 
 ## Scripts & docs

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from rapid_evidence.core.time import utc_now_iso
@@ -542,7 +542,7 @@ class SpotPoolManager:
             ],
             "recent_events": [
                 {"event_type": e.event_type, "timestamp": e.timestamp, "payload": e.payload}
-                for e in self._events[-20:]
+                for e in self._events[-self._event_buffer:]
             ],
         }
 
