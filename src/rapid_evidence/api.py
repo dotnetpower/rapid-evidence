@@ -9,10 +9,11 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from rapid_evidence.batches import BatchExecutor, BatchRegistry
 from rapid_evidence.core.models import FetchRequest
+from rapid_evidence.core.time import utc_now_iso
 from rapid_evidence.jobs import BackgroundJobRegistry, run_tracked
 from rapid_evidence.metrics import MetricsCollector
 from rapid_evidence.metrics.collector import build_metric_sample
@@ -474,6 +475,35 @@ def _emit_quota_increase_suggestions(
 app = FastAPI(lifespan=lifespan)
 
 
+@app.middleware("http")
+async def _no_store_for_realtime(request: Request, call_next):
+    """Stop intermediaries from caching live dashboard snapshots.
+
+    The dashboard polls these endpoints every few seconds; a stale
+    cache layer (browser disk cache, corporate proxy, electron
+    wrapper) returning a 30-second-old snapshot looks like a frozen
+    UI. `Cache-Control: no-store` is the safest opt-out.
+    """
+    response = await call_next(request)
+    path = request.url.path
+    if path.startswith(
+        (
+            "/dashboard",
+            "/batches",
+            "/metrics",
+            "/quota",
+            "/regions",
+            "/scaling",
+            "/jobs",
+            "/events",
+            "/pool",
+            "/health",
+        )
+    ):
+        response.headers.setdefault("Cache-Control", "no-store")
+    return response
+
+
 class RunRequest(BaseModel):
     urls: str | list[str]
     min_vm: int = 1
@@ -876,7 +906,7 @@ def quota_status(request: Request):
 def regions_status(request: Request):
     manager: SpotPoolManager | None = getattr(request.app.state, "pool_manager", None)
     if manager is None or not manager.running:
-        return {"regions": []}
+        return {"regions": [], "as_of": utc_now_iso()}
     snap = manager.snapshot()
     nodes = snap.get("nodes", []) or []
     recent_evictions = snap.get("recent_evictions", []) or []
@@ -900,7 +930,7 @@ def regions_status(request: Request):
         elif state == "busy":
             bucket["busy"] += 1
         bucket["evictions_recent"] += evictions_by_node.get(node.get("node_id"), 0)
-    return {"regions": list(buckets.values())}
+    return {"regions": list(buckets.values()), "as_of": utc_now_iso()}
 
 
 @app.get("/jobs")
@@ -929,6 +959,27 @@ class QuotaProbeRequest(BaseModel):
     requested_per_region: int = 1
     max_parallelism: int = 8
     per_region_timeout_seconds: float = 20.0
+
+    @field_validator("requested_per_region")
+    @classmethod
+    def _check_requested(cls, v: int) -> int:
+        if v < 1 or v > 10_000:
+            raise ValueError("requested_per_region must be in [1, 10000]")
+        return v
+
+    @field_validator("max_parallelism")
+    @classmethod
+    def _check_parallelism(cls, v: int) -> int:
+        if v < 1 or v > 64:
+            raise ValueError("max_parallelism must be in [1, 64]")
+        return v
+
+    @field_validator("per_region_timeout_seconds")
+    @classmethod
+    def _check_timeout(cls, v: float) -> float:
+        if v <= 0 or v > 600:
+            raise ValueError("per_region_timeout_seconds must be in (0, 600]")
+        return v
 
 
 @app.post("/quota/probe-regions", status_code=202)

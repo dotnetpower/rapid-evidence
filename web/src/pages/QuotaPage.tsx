@@ -7,12 +7,14 @@ import { JobsPanel } from "../components/jobs/JobsPanel";
 import { RegionQuotaTable } from "../components/regions/RegionQuotaTable";
 import { extractProbeBundle } from "../components/regions/probeBundle";
 import { formatNumber, timeAgo } from "../lib/format";
+import { useNowTick } from "../lib/useNowTick";
 import "../styles/quota-regions.css";
 
 export function QuotaPage() {
   const { t } = useI18n();
   const qc = useQueryClient();
   const [selected, setSelected] = useState<string | null>(null);
+  const now = useNowTick(1000);
 
   const quota = useQuery({
     queryKey: ["quota-status"],
@@ -68,7 +70,7 @@ export function QuotaPage() {
           <span className="title">{t("regions.totals.title")}</span>
           <span className="meta">
             {hasScan
-              ? t("regions.totals.lastScan", { ago: timeAgo(bundle.lastScanAt) })
+              ? t("regions.totals.lastScan", { ago: timeAgo(bundle.lastScanAt, now) })
               : t("regions.totals.noScan")}
             {bundle.spotQuotaName ? ` · ${bundle.spotQuotaName}` : ""}
           </span>
@@ -93,6 +95,40 @@ export function QuotaPage() {
             </div>
           </div>
         </div>
+        {bundle.totalLimit > 0 && (
+          <div style={{ padding: "0 16px 14px" }}>
+            <div
+              className="quota-bar"
+              style={{ height: 10 }}
+              title={`${bundle.totalUsed} / ${bundle.totalLimit}`}
+            >
+              <div
+                className="quota-bar__fill"
+                style={{
+                  width: `${Math.min(100, (bundle.totalUsed / bundle.totalLimit) * 100)}%`,
+                  background:
+                    bundle.totalHeadroom === 0
+                      ? "var(--warn, #e6c47a)"
+                      : "var(--ok, #5db075)",
+                }}
+              />
+            </div>
+            <div
+              style={{
+                fontSize: 11,
+                marginTop: 4,
+                color: "var(--text-muted)",
+                display: "flex",
+                justifyContent: "space-between",
+              }}
+            >
+              <span>
+                {((bundle.totalUsed / bundle.totalLimit) * 100).toFixed(1)}%
+              </span>
+              <span>vCPU</span>
+            </div>
+          </div>
+        )}
       </section>
 
       {/* Local single-region quota that the active pool provider exposes.
@@ -113,7 +149,7 @@ export function QuotaPage() {
             </span>
             <span className="meta">
               {t("quota.checked")}:{" "}
-              {status.checked_at ? timeAgo(status.checked_at) : t("quota.never")}
+              {status.checked_at ? timeAgo(status.checked_at, now) : t("quota.never")}
             </span>
           </div>
           <div style={{ padding: 14 }}>

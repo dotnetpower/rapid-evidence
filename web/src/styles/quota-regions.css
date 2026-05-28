@@ -41,6 +41,8 @@
   font-size: 11px;
   border: 1px solid var(--border-strong);
   background: var(--bg-elev);
+  white-space: nowrap;
+  line-height: 1.4;
 }
 .pill.ok {
   color: var(--ok);
@@ -251,12 +253,15 @@
   vertical-align: top;
 }
 .quota-table tbody tr:hover {
-  background: var(--bg-elev);
+  background: var(--bg-hover);
 }
 .quota-table tbody tr.selected {
-  background: rgba(0, 120, 212, 0.12);
+  background: rgba(0, 120, 212, 0.18);
   outline: 1px solid var(--accent);
   outline-offset: -1px;
+}
+.quota-table tbody tr.selected:hover {
+  background: rgba(0, 120, 212, 0.24);
 }
 .quota-bar {
   position: relative;

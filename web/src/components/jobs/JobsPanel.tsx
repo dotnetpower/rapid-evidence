@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type BackgroundJob } from "../../lib/api";
 import { useI18n } from "../../lib/i18n";
 import { timeAgo } from "../../lib/format";
+import { useNowTick } from "../../lib/useNowTick";
 
 function summariseResult(job: BackgroundJob): string {
   if (job.error) return job.error;
@@ -25,6 +26,7 @@ function summariseResult(job: BackgroundJob): string {
 export function JobsPanel() {
   const { t } = useI18n();
   const qc = useQueryClient();
+  const now = useNowTick(1000);
 
   const jobs = useQuery({
     queryKey: ["jobs"],
@@ -97,7 +99,7 @@ export function JobsPanel() {
             </thead>
             <tbody>
               {ordered.map((job) => (
-                <tr key={job.job_id}>
+                <tr key={job.job_id} title={`started ${job.started_at}${job.finished_at ? ` · finished ${job.finished_at}` : ""}`}>
                   <td className="id-cell">
                     <div className="id">{job.name}</div>
                     <div className="src" style={{ opacity: 0.5 }}>
@@ -109,7 +111,7 @@ export function JobsPanel() {
                       {t(`jobs.status.${job.status}`)}
                     </span>
                   </td>
-                  <td>{timeAgo(job.started_at)}</td>
+                  <td title={job.started_at}>{timeAgo(job.started_at, now)}</td>
                   <td style={{ fontVariantNumeric: "tabular-nums" }}>
                     {job.duration_seconds == null
                       ? "—"

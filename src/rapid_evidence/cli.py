@@ -8,7 +8,6 @@ from rapid_evidence.providers.local import LocalWorkerProvider
 from rapid_evidence.queue.memory import MemoryRequestQueue
 from rapid_evidence.sources.generic_http import GenericHttpSource
 from rapid_evidence.storage.filesystem import FileSystemResultSink
-from rapid_evidence.audit.ledger import JsonlAuditLedger
 
 
 def main(argv=None):

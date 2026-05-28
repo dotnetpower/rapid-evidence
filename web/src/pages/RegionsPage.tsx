@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api, type DashboardSummary } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import { formatNumber, timeAgo } from "../lib/format";
+import { useNowTick } from "../lib/useNowTick";
 import { RegionCard } from "../components/regions/RegionCard";
 import { RegionsMap } from "../components/regions/RegionsMap";
 import { RegionQuotaTable } from "../components/regions/RegionQuotaTable";
@@ -15,6 +16,7 @@ export function RegionsPage() {
   const { t } = useI18n();
   const [selected, setSelected] = useState<string | null>(null);
   const [view, setView] = useState<ViewMode>("map");
+  const now = useNowTick(1000);
 
   const regions = useQuery({
     queryKey: ["regions-status"],
@@ -93,7 +95,7 @@ export function RegionsPage() {
           <span className="title">{t("regions.totals.title")}</span>
           <span className="meta">
             {hasScan
-              ? t("regions.totals.lastScan", { ago: timeAgo(probeBundle.lastScanAt) })
+              ? t("regions.totals.lastScan", { ago: timeAgo(probeBundle.lastScanAt, now) })
               : t("regions.totals.noScan")}
           </span>
         </div>

@@ -1,9 +1,9 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from time import perf_counter
 
 from rapid_evidence.core.errors import PolicyViolationError
-from rapid_evidence.core.models import FetchRequest, FetchResult, RequestStatus, SourcePolicy, SurgeLimits
+from rapid_evidence.core.models import FetchRequest, FetchResult, RequestStatus, SurgeLimits
 from rapid_evidence.policy.policy_store import PolicyStore
 
 

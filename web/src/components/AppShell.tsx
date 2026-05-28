@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { formatDuration, formatNumber, formatRate, timeAgo } from "../lib/format";
 import { useI18n } from "../lib/i18n";
+import { useNowTick } from "../lib/useNowTick";
 
 interface NavItem {
   to: string;
@@ -29,6 +30,7 @@ function crumbKey(pathname: string): string {
 export function AppShell() {
   const location = useLocation();
   const { t, lang, setLang } = useI18n();
+  const now = useNowTick(1000);
 
   const summary = useQuery({
     queryKey: ["dashboard-summary"],
@@ -169,7 +171,7 @@ export function AppShell() {
           )}
         </span>
         <span className="seg" style={{ marginLeft: "auto" }}>
-          {t("bar.lastSample")} {timeAgo(sample?.timestamp ?? null)}
+          {t("bar.lastSample")} {timeAgo(sample?.timestamp ?? null, now)}
         </span>
       </div>
     </div>

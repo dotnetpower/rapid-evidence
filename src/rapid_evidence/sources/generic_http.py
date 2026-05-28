@@ -1,11 +1,10 @@
 import email.utils
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import httpx
 
 from rapid_evidence.core.errors import SourceFetchError
-from rapid_evidence.core.models import FetchRequest
 from rapid_evidence.sources.url_guard import GuardedHTTPTransport, validate_public_http_url
 
 

@@ -96,6 +96,13 @@ Conventions
 | [src/rapid_evidence/spot/fake.py](../src/rapid_evidence/spot/fake.py) | 70 | `InMemorySpotVmProvider` — deterministic test double. |
 | [src/rapid_evidence/spot/manager.py](../src/rapid_evidence/spot/manager.py) | 572 | **OVER LIMIT.** `PoolEvent`, `PoolCounters`, `PoolMetrics`, `SpotPoolManager` (lifecycle, eviction drain, metrics). Split candidates: `spot/pool_metrics.py`, `spot/pool_lifecycle.py`, `spot/manager.py` (facade). |
 | [src/rapid_evidence/spot/azure_cli_provider.py](../src/rapid_evidence/spot/azure_cli_provider.py) | 443 | **OVER LIMIT.** `AzureCliSpotVmProvider`, `AzureSpotVmConfig` — only `az` CLI, no Azure SDK. Split candidates: `spot/azure/config.py`, `spot/azure/cli.py` (subprocess wrapper), `spot/azure/provider.py`. |
+| [src/rapid_evidence/spot/regions.py](../src/rapid_evidence/spot/regions.py) | 363 | **OVER LIMIT.** `RegionQuotaProbe`, `MultiRegionQuotaReport`, `DEFAULT_REGIONS`, `probe_regions()` (parallel `az vm list-usage`), `request_quota_increase()`. |
+
+## jobs/ — background-task observability
+
+| File | LOC | Responsibility |
+| ---- | --: | -------------- |
+| [src/rapid_evidence/jobs/registry.py](../src/rapid_evidence/jobs/registry.py) | ~220 | `BackgroundJob`, `BackgroundJobRegistry` (bounded, thread + asyncio safe, snapshot-on-read with deep copy), `run_tracked()` helper. Backs the dashboard `⚙ jobs N` status segment and the JobsPanel. |
 
 ## worker/ — remote agent
 
@@ -156,7 +163,10 @@ Gaps to close on next test refactor:
 | [web/src/components/regions/RegionCard.tsx](../web/src/components/regions/RegionCard.tsx) | Region card (clickable, summary metrics) for the `/regions` cards view. |
 | [web/src/components/regions/RegionsMap.tsx](../web/src/components/regions/RegionsMap.tsx) | World map (react-leaflet) for `/regions`, marker colour by status, tooltip with nodes / quota / evictions. |
 | [web/src/components/regions/regionGeo.ts](../web/src/components/regions/regionGeo.ts) | Static lat/lon catalogue of Azure public regions used by `RegionsMap`. |
+| [web/src/components/regions/RegionQuotaTable.tsx](../web/src/components/regions/RegionQuotaTable.tsx) | Per-region quota table (used/limit/headroom + status pill with icon prefix). Shared by `/regions` and `/quota`. |
+| [web/src/components/regions/probeBundle.ts](../web/src/components/regions/probeBundle.ts) | `extractProbeBundle(jobs)` — picks the latest succeeded `azure-region-quota-scan` job and returns probes + subscription totals + last-scan timestamp. Shared by `/regions` and `/quota`. |
 | [web/src/components/jobs/JobsPanel.tsx](../web/src/components/jobs/JobsPanel.tsx) | Background-jobs panel for the `/quota` page (scan-now button + recent jobs list). |
+| [web/src/lib/useNowTick.ts](../web/src/lib/useNowTick.ts) | `useNowTick(intervalMs)` hook — refreshes `Date.now()`-derived UI (relative timestamps) on a steady cadence even when no query refetched. |
 | [web/src/components/NewBatchDialog.tsx](../web/src/components/NewBatchDialog.tsx) | New batch dialog. |
 | [web/src/components/ThroughputChart.tsx](../web/src/components/ThroughputChart.tsx) | Throughput chart. |
 | [web/src/pages/ThroughputPage.tsx](../web/src/pages/ThroughputPage.tsx) | Throughput page route. |

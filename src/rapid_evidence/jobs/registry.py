@@ -14,6 +14,7 @@ observability surface, not a durable queue.
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
 import threading
 from dataclasses import dataclass, field
@@ -150,6 +151,9 @@ class BackgroundJobRegistry:
 
 
 def _snapshot(job: BackgroundJob) -> BackgroundJob:
+    # Deep-copy result + metadata so callers cannot mutate nested
+    # collections (lists of region probes, request lists) the registry
+    # still holds. The flat fields (str/int/None) are inherently safe.
     return BackgroundJob(
         job_id=job.job_id,
         name=job.name,
@@ -157,9 +161,9 @@ def _snapshot(job: BackgroundJob) -> BackgroundJob:
         status=job.status,
         finished_at=job.finished_at,
         duration_seconds=job.duration_seconds,
-        result=dict(job.result) if job.result is not None else None,
+        result=copy.deepcopy(job.result) if job.result is not None else None,
         error=job.error,
-        metadata=dict(job.metadata),
+        metadata=copy.deepcopy(job.metadata),
     )
 
 

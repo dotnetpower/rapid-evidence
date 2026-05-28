@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../lib/api";
 import { useI18n } from "../lib/i18n";
@@ -41,6 +41,17 @@ export function NewBatchDialog({ open, onClose }: NewBatchDialogProps) {
     },
   });
 
+  // Close on Escape — small QoL for keyboard users; the open-state
+  // guard means the listener is only mounted while the dialog is up.
+  useEffect(() => {
+    if (!open) return;
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [open, onClose]);
+
   if (!open) return null;
 
   const error = create.error instanceof ApiError ? create.error.message : null;
@@ -80,6 +91,8 @@ export function NewBatchDialog({ open, onClose }: NewBatchDialogProps) {
               id="workers"
               type="number"
               min={1}
+              max={64}
+              step={1}
               value={workers}
               onChange={(e) => setWorkers(e.target.value)}
             />

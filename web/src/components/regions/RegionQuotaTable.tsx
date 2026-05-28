@@ -24,6 +24,12 @@ function probeStatus(p: RegionProbe): StatusKey {
   return "ok";
 }
 
+function statusIcon(s: StatusKey): string {
+  if (s === "error") return "✕";
+  if (s === "exhausted") return "⚠";
+  return "✓";
+}
+
 function statusTone(s: StatusKey): string {
   if (s === "error") return "var(--bad, #e06c75)";
   if (s === "exhausted") return "var(--warn, #e6c47a)";
@@ -51,7 +57,7 @@ export function RegionQuotaTable({ probes, selected, onSelect }: RegionQuotaTabl
           <th style={{ textAlign: "left" }}>{t("regions.quotaTable.col.region")}</th>
           <th style={{ width: 110 }}>{t("regions.quotaTable.col.usage")}</th>
           <th>{t("regions.quotaTable.col.headroom")}</th>
-          <th style={{ width: 100 }}>{t("regions.quotaTable.col.status")}</th>
+          <th style={{ width: 120 }}>{t("regions.quotaTable.col.status")}</th>
         </tr>
       </thead>
       <tbody>
@@ -97,6 +103,7 @@ export function RegionQuotaTable({ probes, selected, onSelect }: RegionQuotaTabl
                   style={{ color: statusTone(status), borderColor: statusTone(status) }}
                   title={p.error ?? undefined}
                 >
+                  <span aria-hidden="true" style={{ marginRight: 4 }}>{statusIcon(status)}</span>
                   {t(`regions.quotaTable.status.${status}`)}
                 </span>
               </td>
