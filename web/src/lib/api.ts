@@ -174,6 +174,41 @@ export interface BatchTimelineEvent {
   payload: Record<string, unknown>;
 }
 
+export interface BackgroundJob {
+  job_id: string;
+  name: string;
+  started_at: string;
+  finished_at: string | null;
+  duration_seconds: number | null;
+  status: "running" | "succeeded" | "failed" | "cancelled";
+  result: Record<string, unknown> | null;
+  error: string | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface QuotaProbeRequest {
+  regions?: string[] | null;
+  spot_quota_name?: string;
+  requested_per_region?: number;
+  max_parallelism?: number;
+  per_region_timeout_seconds?: number;
+}
+
+export interface QuotaIncreaseRequest {
+  region: string;
+  new_limit: number;
+  spot_quota_name?: string;
+}
+
+export interface QuotaIncreaseResult {
+  region: string;
+  spot_quota_name: string;
+  new_limit: number;
+  status: string;
+  next_steps: string[];
+  job_id?: string;
+}
+
 export class ApiError extends Error {
   constructor(public status: number, message: string, public payload?: unknown) {
     super(message);
@@ -251,4 +286,20 @@ export const api = {
     apiFetch<{ events: BatchTimelineEvent[] }>(
       `/batches/${encodeURIComponent(batchId)}/timeline`,
     ),
+  jobsList: (limit = 50) =>
+    apiFetch<{ jobs: BackgroundJob[] }>(`/jobs?limit=${encodeURIComponent(String(limit))}`),
+  jobsGet: (jobId: string) =>
+    apiFetch<BackgroundJob>(`/jobs/${encodeURIComponent(jobId)}`),
+  quotaProbeRegions: (body: QuotaProbeRequest) =>
+    apiFetch<BackgroundJob>("/quota/probe-regions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body ?? {}),
+    }),
+  quotaRequestIncrease: (body: QuotaIncreaseRequest) =>
+    apiFetch<QuotaIncreaseResult>("/quota/request-increase", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
 };

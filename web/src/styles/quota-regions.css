@@ -122,3 +122,27 @@
 .dot.warn {
   background: var(--warn);
 }
+
+/* Background jobs panel */
+.jobs-probe {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  background: var(--bg-elev);
+}
+.jobs-probe__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-weight: 500;
+}
+.jobs-probe__hint {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.pill.warn {
+  color: var(--warn);
+  border-color: rgba(220, 170, 50, 0.45);
+}

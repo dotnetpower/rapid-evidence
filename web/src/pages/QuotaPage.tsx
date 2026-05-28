@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type DashboardSummary } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import { QuotaMeter } from "../components/quota/QuotaMeter";
+import { JobsPanel } from "../components/jobs/JobsPanel";
 import { timeAgo } from "../lib/format";
 import "../styles/quota-regions.css";
 
@@ -72,6 +73,8 @@ export function QuotaPage() {
           </div>
         </div>
       )}
+
+      <JobsPanel />
     </>
   );
 }

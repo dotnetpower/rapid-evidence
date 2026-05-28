@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from rapid_evidence.batches import BatchExecutor, BatchRegistry
 from rapid_evidence.core.models import FetchRequest
+from rapid_evidence.jobs import BackgroundJobRegistry, run_tracked
 from rapid_evidence.metrics import MetricsCollector
 from rapid_evidence.metrics.collector import build_metric_sample
 from rapid_evidence.orchestrator.scheduler import SurgeOrchestrator
@@ -23,6 +24,11 @@ from rapid_evidence.sources.generic_http import GenericHttpSource
 from rapid_evidence.spot.fake import InMemorySpotVmProvider
 from rapid_evidence.spot.manager import SpotPoolManager
 from rapid_evidence.spot.models import SpotNodeState, SpotPoolConfig
+from rapid_evidence.spot.regions import (
+    DEFAULT_REGIONS,
+    probe_regions,
+    request_quota_increase,
+)
 from rapid_evidence.spot.scheduler import SpotVmScheduler
 from rapid_evidence.spot.sizing import estimate_spot_capacity
 from rapid_evidence.storage.filesystem import FileSystemResultSink
@@ -222,6 +228,11 @@ async def lifespan(app: FastAPI):
     )
     app.state.batch_registry = registry
 
+    jobs = BackgroundJobRegistry(
+        max_jobs=_env_int("RAPID_EVIDENCE_JOBS_MAX", 100),
+    )
+    app.state.jobs = jobs
+
     def _snapshot() -> Any:
         counters: dict[str, int] = {}
         if manager is not None and manager.running:
@@ -255,9 +266,36 @@ async def lifespan(app: FastAPI):
         )
     app.state.eviction_drain_task = eviction_task
 
+    region_scan_task: asyncio.Task[None] | None = None
+    region_scan_interval = _env_float(
+        "RAPID_EVIDENCE_REGION_SCAN_INTERVAL_SECONDS", 86400.0
+    )
+    if region_scan_interval > 0:
+        region_scan_task = asyncio.create_task(
+            _region_scan_loop(
+                jobs=jobs,
+                interval_seconds=region_scan_interval,
+                initial_delay_seconds=_env_float(
+                    "RAPID_EVIDENCE_REGION_SCAN_INITIAL_DELAY_SECONDS", 5.0
+                ),
+                spot_quota_name=os.environ.get(
+                    "RAPID_EVIDENCE_AZURE_SPOT_QUOTA_NAME", "standardDASv5Family"
+                ),
+                regions=_parse_regions_env(),
+            ),
+            name="rapid-evidence-region-scan",
+        )
+    app.state.region_scan_task = region_scan_task
+
     try:
         yield
     finally:
+        if region_scan_task is not None:
+            region_scan_task.cancel()
+            try:
+                await region_scan_task
+            except (asyncio.CancelledError, Exception):
+                pass
         if eviction_task is not None:
             eviction_task.cancel()
             try:
@@ -278,6 +316,8 @@ async def lifespan(app: FastAPI):
         app.state.pool_manager = None
         app.state.worker_transport = None
         app.state.eviction_drain_task = None
+        app.state.region_scan_task = None
+        app.state.jobs = None
 
 
 async def _drain_evictions_loop(
@@ -309,6 +349,58 @@ async def _drain_evictions_loop(
         except Exception as exc:  # noqa: BLE001
             logging.getLogger(__name__).warning(
                 "eviction drain loop iteration failed: %s", exc
+            )
+        try:
+            await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            raise
+
+
+def _parse_regions_env() -> tuple[str, ...] | None:
+    raw = os.environ.get("RAPID_EVIDENCE_AZURE_REGIONS", "").strip()
+    if not raw:
+        return None
+    parts = [r.strip() for r in re.split(r"[\s,;]+", raw) if r.strip()]
+    return tuple(parts) if parts else None
+
+
+async def _region_scan_loop(
+    *,
+    jobs: BackgroundJobRegistry,
+    interval_seconds: float,
+    initial_delay_seconds: float,
+    spot_quota_name: str,
+    regions: tuple[str, ...] | None,
+) -> None:
+    """Periodic all-region quota scan, tracked as background jobs.
+
+    Default cadence is 24 hours per the requirement; configurable via
+    `RAPID_EVIDENCE_REGION_SCAN_INTERVAL_SECONDS`. The first run is
+    delayed slightly so the dashboard does not block startup on `az`.
+    """
+    interval = max(60.0, interval_seconds)
+    try:
+        await asyncio.sleep(max(0.0, initial_delay_seconds))
+    except asyncio.CancelledError:
+        raise
+    while True:
+        try:
+            await run_tracked(
+                jobs,
+                "azure-region-quota-scan",
+                lambda: probe_regions(
+                    regions=regions, spot_quota_name=spot_quota_name
+                ),
+                metadata={
+                    "regions": list(regions) if regions else list(DEFAULT_REGIONS),
+                    "spot_quota_name": spot_quota_name,
+                    "schedule": "periodic",
+                    "interval_seconds": interval,
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            logging.getLogger(__name__).warning(
+                "region scan loop iteration failed: %s", exc
             )
         try:
             await asyncio.sleep(interval)
@@ -746,6 +838,87 @@ def regions_status(request: Request):
             bucket["busy"] += 1
         bucket["evictions_recent"] += evictions_by_node.get(node.get("node_id"), 0)
     return {"regions": list(buckets.values())}
+
+
+@app.get("/jobs")
+def jobs_list(request: Request, limit: int = 50):
+    jobs: BackgroundJobRegistry | None = getattr(request.app.state, "jobs", None)
+    if jobs is None:
+        return {"jobs": []}
+    cap = max(1, min(limit, 500))
+    return {"jobs": [j.to_dict() for j in jobs.list(limit=cap)]}
+
+
+@app.get("/jobs/{job_id}")
+def jobs_get(job_id: str, request: Request):
+    jobs: BackgroundJobRegistry | None = getattr(request.app.state, "jobs", None)
+    if jobs is None:
+        raise HTTPException(status_code=404, detail="jobs registry not initialised")
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    return job.to_dict()
+
+
+class QuotaProbeRequest(BaseModel):
+    regions: list[str] | None = None
+    spot_quota_name: str = "standardDASv5Family"
+    requested_per_region: int = 1
+    max_parallelism: int = 8
+    per_region_timeout_seconds: float = 20.0
+
+
+@app.post("/quota/probe-regions", status_code=202)
+async def quota_probe_regions(payload: QuotaProbeRequest, request: Request):
+    jobs: BackgroundJobRegistry | None = getattr(request.app.state, "jobs", None)
+    if jobs is None:
+        raise HTTPException(status_code=503, detail="jobs registry not initialised")
+    regions_tuple = tuple(payload.regions) if payload.regions else None
+    job, _ = await run_tracked(
+        jobs,
+        "azure-region-quota-scan",
+        lambda: probe_regions(
+            regions=regions_tuple,
+            spot_quota_name=payload.spot_quota_name,
+            requested_per_region=payload.requested_per_region,
+            max_parallelism=payload.max_parallelism,
+            per_region_timeout_seconds=payload.per_region_timeout_seconds,
+        ),
+        metadata={
+            "regions": list(regions_tuple or DEFAULT_REGIONS),
+            "spot_quota_name": payload.spot_quota_name,
+            "schedule": "manual",
+        },
+    )
+    return job.to_dict()
+
+
+class QuotaIncreaseRequest(BaseModel):
+    region: str
+    new_limit: int
+    spot_quota_name: str = "standardDASv5Family"
+
+
+@app.post("/quota/request-increase")
+def quota_request_increase(payload: QuotaIncreaseRequest, request: Request):
+    jobs: BackgroundJobRegistry | None = getattr(request.app.state, "jobs", None)
+    plan = request_quota_increase(
+        payload.region,
+        spot_quota_name=payload.spot_quota_name,
+        new_limit=payload.new_limit,
+    )
+    if jobs is not None:
+        job = jobs.start(
+            f"quota-increase-request-{payload.region}",
+            metadata={
+                "region": payload.region,
+                "spot_quota_name": payload.spot_quota_name,
+                "new_limit": payload.new_limit,
+            },
+        )
+        jobs.finish(job.job_id, status="succeeded", result=plan)
+        plan["job_id"] = job.job_id
+    return plan
 
 
 @app.get("/batches/{batch_id}/timeline")

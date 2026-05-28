@@ -206,6 +206,22 @@ const en: Dict = {
   "regions.col.state": "state",
   "regions.col.outbound": "outbound IP",
   "regions.click_hint": "click a card to see its nodes",
+  // background jobs (used by Quota page panel)
+  "jobs.panel.title": "Background jobs",
+  "jobs.panel.empty": "No background jobs yet",
+  "jobs.probe.title": "Scan all Azure regions",
+  "jobs.probe.button": "scan now",
+  "jobs.probe.running": "scanning…",
+  "jobs.probe.hint": "Runs `az vm list-usage` against {count} regions in parallel. The result is shown in the jobs list below and updates the totals on this page.",
+  "jobs.status.running": "running",
+  "jobs.status.succeeded": "succeeded",
+  "jobs.status.failed": "failed",
+  "jobs.status.cancelled": "cancelled",
+  "jobs.col.name": "name",
+  "jobs.col.status": "status",
+  "jobs.col.started": "started",
+  "jobs.col.duration": "duration",
+  "jobs.col.summary": "summary",
 };
 
 const ko: Dict = {
@@ -398,6 +414,21 @@ const ko: Dict = {
   "regions.col.state": "상태",
   "regions.col.outbound": "outbound IP",
   "regions.click_hint": "카드를 클릭하면 해당 리전의 노드 목록이 보입니다",
+  "jobs.panel.title": "백그라운드 작업",
+  "jobs.panel.empty": "아직 작업이 없습니다",
+  "jobs.probe.title": "모든 Azure 리전 스캔",
+  "jobs.probe.button": "지금 스캔",
+  "jobs.probe.running": "스캔 중…",
+  "jobs.probe.hint": "{count}개 리전에 `az vm list-usage` 를 병렬로 실행합니다. 결과는 아래 작업 목록에 나타나며 이 페이지 수치도 갱신됩니다.",
+  "jobs.status.running": "실행 중",
+  "jobs.status.succeeded": "성공",
+  "jobs.status.failed": "실패",
+  "jobs.status.cancelled": "취소",
+  "jobs.col.name": "이름",
+  "jobs.col.status": "상태",
+  "jobs.col.started": "시작",
+  "jobs.col.duration": "소요",
+  "jobs.col.summary": "요약",
 };
 
 const DICTS: Record<Lang, Dict> = { en, ko };
