@@ -30,6 +30,7 @@ export default defineConfig({
       "/dashboard": "http://localhost:8800",
       "/run": "http://localhost:8800",
       "/events": "http://localhost:8800",
+      "/jobs": "http://localhost:8800",
       "/scaling": {
         target: "http://localhost:8800",
         bypass: htmlAwareBypass,
