@@ -279,3 +279,25 @@
 .pill.status-ok { color: var(--ok); }
 .pill.status-exhausted { color: var(--warn); }
 .pill.status-error { color: var(--bad); }
+
+/* secondary panel — local provider snapshot vs subscription totals */
+.quota-secondary {
+  opacity: 0.92;
+  font-size: 12px;
+}
+.quota-secondary .panel-head {
+  background: var(--bg-elev);
+}
+.quota-secondary[open] .panel-head {
+  border-bottom: 1px solid var(--border);
+}
+.quota-secondary summary::marker {
+  color: var(--text-dim);
+}
+
+/* loading-map fallback */
+.loading-map {
+  padding: 24px;
+  font-size: 12px;
+  color: var(--text-muted);
+}

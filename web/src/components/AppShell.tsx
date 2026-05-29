@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { formatDuration, formatNumber, formatRate, timeAgo } from "../lib/format";
@@ -100,7 +100,9 @@ export function AppShell() {
               {t("lang.ko")}
             </button>
           </span>
-          <span className={`led${status === "connected" ? "" : " off"}`}>
+          <span
+            className={`led${status === "connected" ? "" : status === "connecting" ? " warming" : " off"}`}
+          >
             {statusLabel}
           </span>
           {summary.data?.pool?.provider && (
@@ -162,14 +164,14 @@ export function AppShell() {
         <span className="seg">
           {t("bar.drainEta")} {formatDuration(summary.data?.drain_eta_seconds ?? null)}
         </span>
-        <span className="seg" title={t("bar.jobsTooltip")}>
+        <Link to="/quota" className="seg" title={t("bar.jobsTooltip")}>
           ⚙ {t("bar.jobs")} {runningJobs}
           {failedJobs > 0 && (
-            <span style={{ marginLeft: 4, color: "var(--bad, #e06c75)" }}>
+            <span style={{ marginLeft: 4, color: "#ffd1d6" }}>
               · {failedJobs} {t("bar.failed")}
             </span>
           )}
-        </span>
+        </Link>
         <span className="seg" style={{ marginLeft: "auto" }}>
           {t("bar.lastSample")} {timeAgo(sample?.timestamp ?? null, now)}
         </span>

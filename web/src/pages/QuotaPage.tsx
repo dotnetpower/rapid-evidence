@@ -96,16 +96,16 @@ export function QuotaPage() {
           </div>
         </div>
         {bundle.totalLimit > 0 && (
-          <div style={{ padding: "0 16px 14px" }}>
+          <div style={{ padding: "4px 16px 14px" }}>
             <div
               className="quota-bar"
-              style={{ height: 10 }}
+              style={{ height: 14 }}
               title={`${bundle.totalUsed} / ${bundle.totalLimit}`}
             >
               <div
                 className="quota-bar__fill"
                 style={{
-                  width: `${Math.min(100, (bundle.totalUsed / bundle.totalLimit) * 100)}%`,
+                  width: `${Math.max(0.5, Math.min(100, (bundle.totalUsed / bundle.totalLimit) * 100))}%`,
                   background:
                     bundle.totalHeadroom === 0
                       ? "var(--warn, #e6c47a)"
@@ -116,16 +116,16 @@ export function QuotaPage() {
             <div
               style={{
                 fontSize: 11,
-                marginTop: 4,
+                marginTop: 6,
                 color: "var(--text-muted)",
                 display: "flex",
                 justifyContent: "space-between",
               }}
             >
               <span>
-                {((bundle.totalUsed / bundle.totalLimit) * 100).toFixed(1)}%
+                {((bundle.totalUsed / bundle.totalLimit) * 100).toFixed(1)}% used
               </span>
-              <span>vCPU</span>
+              <span>{formatNumber(bundle.totalHeadroom)} vCPU available</span>
             </div>
           </div>
         )}
@@ -142,16 +142,16 @@ export function QuotaPage() {
           </div>
         </div>
       ) : (
-        <div className="panel">
-          <div className="panel-head">
+        <details className="panel quota-secondary" open style={{ marginTop: 8 }}>
+          <summary className="panel-head" style={{ cursor: "pointer" }}>
             <span className="title">
-              {provider ? `provider: ${provider}` : t("quota.page.title")}
+              {provider ? `${t("quota.localProvider")}: ${provider}` : t("quota.page.title")}
             </span>
             <span className="meta">
               {t("quota.checked")}:{" "}
               {status.checked_at ? timeAgo(status.checked_at, now) : t("quota.never")}
             </span>
-          </div>
+          </summary>
           <div style={{ padding: 14 }}>
             <QuotaMeter status={status} />
             {status.error ? (
@@ -160,7 +160,7 @@ export function QuotaPage() {
               </div>
             ) : null}
           </div>
-        </div>
+        </details>
       )}
 
       {/* Per-region quota detail — the same table the Regions page uses,

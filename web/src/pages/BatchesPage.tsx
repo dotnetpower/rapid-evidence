@@ -10,6 +10,7 @@ import {
 } from "../components/batches/BatchFilterBar";
 import { BatchListTable } from "../components/batches/BatchListTable";
 import { BatchDetailDrawer } from "../components/batches/BatchDetailDrawer";
+import { NewBatchDialog } from "../components/NewBatchDialog";
 
 const ACTIVE_STATES = new Set(["queued", "running", "paused"]);
 const TERMINAL_STATES = new Set(["done", "cancelled", "failed"]);
@@ -42,6 +43,7 @@ export function BatchesPage() {
   const { batchId } = useParams<{ batchId?: string }>();
   const [filter, setFilter] = useState<BatchFilter>("all");
   const [sort, setSort] = useState<BatchSort>("newest");
+  const [dialogOpen, setDialogOpen] = useState(false);
 
   const batches = useQuery({
     queryKey: ["batches"],
@@ -72,6 +74,13 @@ export function BatchesPage() {
           >
             {t("batches.page.refresh")}
           </button>
+          <button
+            type="button"
+            className="btn primary"
+            onClick={() => setDialogOpen(true)}
+          >
+            ＋ {t("page.newBatch")}
+          </button>
         </div>
       </div>
 
@@ -81,6 +90,7 @@ export function BatchesPage() {
         sort={sort}
         onSortChange={setSort}
         count={visible.length}
+        disabled={rows.length === 0}
       />
 
       <BatchListTable
@@ -95,6 +105,8 @@ export function BatchesPage() {
           onClose={() => navigate("/batches")}
         />
       )}
+
+      <NewBatchDialog open={dialogOpen} onClose={() => setDialogOpen(false)} />
     </div>
   );
 }

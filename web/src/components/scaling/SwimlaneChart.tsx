@@ -105,6 +105,13 @@ export function SwimlaneChart({ samples, events }: Props) {
               stroke="#3c3c3c"
               width={42}
               allowDecimals={false}
+              label={{
+                value: "VMs",
+                angle: -90,
+                position: "insideLeft",
+                offset: 12,
+                style: { fill: "#6e6e6e", fontSize: 10 },
+              }}
             />
             <Tooltip
               contentStyle={{

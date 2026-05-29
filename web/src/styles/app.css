@@ -40,6 +40,14 @@
   display: inline-block;
 }
 .led.off::before { background: var(--bad); }
+.led.warming::before {
+  background: var(--warn);
+  animation: led-pulse 1.2s ease-in-out infinite;
+}
+@keyframes led-pulse {
+  0%, 100% { opacity: 0.4; transform: scale(0.9); }
+  50% { opacity: 1; transform: scale(1.15); }
+}
 
 .sidebar {
   background: var(--bg-side);
@@ -61,11 +69,25 @@
   border-radius: var(--radius-md);
   font-size: 13px;
   text-decoration: none;
+  position: relative;
+  transition: background 100ms ease, color 100ms ease;
 }
 .nav:hover { background: var(--bg-hover); color: var(--text); text-decoration: none; }
 .nav.active {
   background: var(--accent-soft);
   color: var(--text-strong);
+}
+.nav.active::before {
+  /* Left-edge accent bar so the active item reads at a glance even
+     when the soft-fill background blends with the panel. */
+  content: "";
+  position: absolute;
+  left: -4px;
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
 }
 .nav .ic {
   width: 14px;
@@ -93,17 +115,46 @@
   background: var(--accent);
   color: #fff;
   font-size: 11px;
-  padding: 0 12px;
+  padding: 0 14px;
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 18px;
 }
 .statusbar .seg::before {
   content: "·";
-  margin-right: 14px;
-  color: rgba(255, 255, 255, 0.5);
+  margin-right: 18px;
+  color: rgba(255, 255, 255, 0.55);
 }
 .statusbar .seg:first-of-type::before { content: ""; margin: 0; }
+.statusbar a.seg,
+.statusbar a.seg:visited {
+  color: inherit;
+  text-decoration: none;
+  border-radius: 3px;
+  padding: 1px 3px;
+  margin: 0 -3px;
+}
+.statusbar a.seg:hover {
+  background: rgba(255, 255, 255, 0.16);
+  text-decoration: none;
+}
+
+/* Visible focus outline for keyboard navigation. Mouse users don't
+   see it thanks to `:focus-visible` semantics. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+button:focus-visible,
+a:focus-visible,
+.nav:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 
 .page-head {
   display: flex;
@@ -165,6 +216,12 @@
   border-radius: var(--radius-md);
   overflow: hidden;
   margin-bottom: 18px;
+}
+@media (max-width: 1100px) {
+  .kpis { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 560px) {
+  .kpis { grid-template-columns: 1fr; }
 }
 .kpi { background: var(--bg-panel); padding: 14px 18px; }
 .kpi .l {
@@ -234,6 +291,9 @@
   grid-template-columns: 1.6fr 1fr;
   gap: 14px;
   margin-bottom: 18px;
+}
+@media (max-width: 1100px) {
+  .grid-1 { grid-template-columns: 1fr; }
 }
 
 /* scaling / pool panel */

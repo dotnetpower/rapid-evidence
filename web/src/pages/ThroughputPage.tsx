@@ -90,7 +90,13 @@ export function ThroughputPage() {
               ? t("kpi.drain.empty")
               : t("kpi.drain.rate", { rate: formatRate(data?.throughput_per_second) })
           }
-          tone={data?.drain_eta_seconds == null && (data?.backlog ?? 0) > 0 ? "warn" : "neutral"}
+          tone={
+            data?.drain_eta_seconds == null && (data?.backlog ?? 0) > 0
+              ? "warn"
+              : data?.drain_eta_seconds === 0
+              ? "ok"
+              : "neutral"
+          }
         />
         <KpiCard
           label={t("kpi.spot.label")}

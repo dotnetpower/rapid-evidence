@@ -74,9 +74,9 @@ export function ThroughputChart() {
       </div>
       <div style={{ padding: "12px 14px 6px" }}>
         <div style={{ display: "flex", gap: 14, fontSize: 11, color: "var(--text-muted)", paddingBottom: 8 }}>
-          <Legend color="var(--info)">{t("chart.legend.backlog")}</Legend>
-          <Legend color="var(--violet)" dashed>{t("chart.legend.vms")}</Legend>
-          <Legend color="var(--ok)">{t("chart.legend.tp")}</Legend>
+          <Legend color="var(--info)" hint={t("chart.legendHint.backlog")}>{t("chart.legend.backlog")}</Legend>
+          <Legend color="var(--violet)" dashed hint={t("chart.legendHint.vms")}>{t("chart.legend.vms")}</Legend>
+          <Legend color="var(--ok)" hint={t("chart.legendHint.tp")}>{t("chart.legend.tp")}</Legend>
         </div>
         <div style={{ width: "100%", height: 260 }}>
           {rows.length < 2 ? (
@@ -150,9 +150,22 @@ export function ThroughputChart() {
   );
 }
 
-function Legend({ color, children, dashed = false }: { color: string; children: React.ReactNode; dashed?: boolean }) {
+function Legend({
+  color,
+  children,
+  dashed = false,
+  hint,
+}: {
+  color: string;
+  children: React.ReactNode;
+  dashed?: boolean;
+  hint?: string;
+}) {
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+    <span
+      style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: hint ? "help" : "default" }}
+      title={hint}
+    >
       <span
         style={{
           display: "inline-block",

@@ -132,7 +132,10 @@ export function RegionsPage() {
           <div className="panel-head">
             <span className="title">{t("regions.map.title")}</span>
             <span className="meta">
-              {rows.length} · {probeBundle.totalCount} probed
+              {t("regions.map.regionsMeta", {
+                live: rows.length,
+                probed: probeBundle.totalCount,
+              })}
             </span>
           </div>
           <RegionsMap
