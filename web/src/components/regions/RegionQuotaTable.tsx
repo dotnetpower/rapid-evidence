@@ -1,4 +1,5 @@
 import { useI18n } from "../../lib/i18n";
+import { timeAgoLocalized } from "../../lib/format";
 import { REGION_GEO } from "./regionGeo";
 
 export interface RegionProbe {
@@ -14,7 +15,15 @@ interface RegionQuotaTableProps {
   probes: RegionProbe[];
   selected: string | null;
   onSelect: (region: string | null) => void;
-}
+  /** Timestamp (ISO) of the latest probe scan. Shared across all rows since
+   * a single `azure-region-quota-scan` job covers every region in one pass. */
+  lastScanAt?: string | null;
+  /** Current wall-clock ms, normally driven by `useNowTick` so the relative
+   * "X초 전" label re-renders on a 1s cadence. */
+  nowMs?: number;  /** Pinned regions (sorted to the top by the parent). Optional so this
+   * component stays usable in places that don't need favorites yet. */
+  favorites?: ReadonlySet<string>;
+  onToggleFavorite?: (region: string) => void;}
 
 type StatusKey = "ok" | "exhausted" | "error";
 
@@ -36,24 +45,33 @@ function statusTone(s: StatusKey): string {
   return "var(--ok, #5db075)";
 }
 
-export function RegionQuotaTable({ probes, selected, onSelect }: RegionQuotaTableProps) {
-  const { t } = useI18n();
+export function RegionQuotaTable({
+  probes,
+  selected,
+  onSelect,
+  lastScanAt = null,
+  nowMs,
+  favorites,
+  onToggleFavorite,
+}: RegionQuotaTableProps) {
+  const { t, lang } = useI18n();
   if (probes.length === 0) {
     return <div className="empty" style={{ padding: 16 }}>{t("regions.quotaTable.empty")}</div>;
   }
-  // Sort: errors first (need attention), then exhausted, then by
-  // headroom desc so the biggest headroom is most prominent.
-  const sorted = [...probes].sort((a, b) => {
-    const sa = probeStatus(a);
-    const sb = probeStatus(b);
-    const order = { error: 0, exhausted: 1, ok: 2 } as const;
-    if (order[sa] !== order[sb]) return order[sa] - order[sb];
-    return (b.headroom ?? -1) - (a.headroom ?? -1);
-  });
+  const checkedLabel = lastScanAt
+    ? t("regions.quotaTable.checkedAgo", {
+        ago: timeAgoLocalized(lastScanAt, nowMs ?? Date.now(), lang),
+      })
+    : t("regions.quotaTable.neverChecked");
+  // Parent sorts now; this component preserves caller order so the
+  // toolbar's sort/favorites choices are respected.
+  const sorted = probes;
+  const showFav = !!onToggleFavorite;
   return (
     <table className="quota-table">
       <thead>
         <tr>
+          {showFav && <th style={{ width: 28 }} aria-label={t("common.pin")} />}
           <th style={{ textAlign: "left" }}>{t("regions.quotaTable.col.region")}</th>
           <th style={{ width: 110 }}>{t("regions.quotaTable.col.usage")}</th>
           <th>{t("regions.quotaTable.col.headroom")}</th>
@@ -69,6 +87,7 @@ export function RegionQuotaTable({ probes, selected, onSelect }: RegionQuotaTabl
           const status = probeStatus(p);
           const isSel = selected === p.region;
           const label = REGION_GEO[p.region]?.label ?? p.region;
+          const isFav = favorites?.has(p.region) ?? false;
           return (
             <tr
               key={p.region}
@@ -77,6 +96,19 @@ export function RegionQuotaTable({ probes, selected, onSelect }: RegionQuotaTabl
               style={{ cursor: "pointer" }}
               title={p.error ?? label}
             >
+              {showFav && (
+                <td onClick={(e) => e.stopPropagation()}>
+                  <button
+                    type="button"
+                    className={`fav-btn${isFav ? " on" : ""}`}
+                    onClick={() => onToggleFavorite?.(p.region)}
+                    aria-label={isFav ? t("common.unpin") : t("common.pin")}
+                    title={isFav ? t("common.unpin") : t("common.pin")}
+                  >
+                    {isFav ? "★" : "☆"}
+                  </button>
+                </td>
+              )}
               <td>
                 <div style={{ fontFamily: "monospace", fontSize: 12 }}>{p.region}</div>
                 <div style={{ fontSize: 10, opacity: 0.6 }}>{label}</div>
@@ -106,6 +138,13 @@ export function RegionQuotaTable({ probes, selected, onSelect }: RegionQuotaTabl
                   <span aria-hidden="true" style={{ marginRight: 4 }}>{statusIcon(status)}</span>
                   {t(`regions.quotaTable.status.${status}`)}
                 </span>
+                <div
+                  className="quota-table__checked"
+                  style={{ fontSize: 10, opacity: 0.6, marginTop: 4 }}
+                  title={lastScanAt ?? undefined}
+                >
+                  {checkedLabel}
+                </div>
               </td>
             </tr>
           );

@@ -1,10 +1,21 @@
 import { useMemo, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
+import { useOutletContext } from "react-router-dom";
 import { api, type DashboardSummary } from "../lib/api";
 import { useI18n } from "../lib/i18n";
+import { useDocumentTitle } from "../lib/useDocumentTitle";
+import { useFavorites } from "../lib/useFavorites";
+import { useToast } from "../lib/useToast";
+import { downloadCsv, csvDateStamp } from "../lib/csv";
 import { QuotaMeter } from "../components/quota/QuotaMeter";
 import { JobsPanel } from "../components/jobs/JobsPanel";
 import { RegionQuotaTable } from "../components/regions/RegionQuotaTable";
+import { RegionsToolbar } from "../components/regions/RegionsToolbar";
+import {
+  filterProbes,
+  sortProbes,
+  type RegionSortKey,
+} from "../components/regions/regionFilter";
 import { extractProbeBundle } from "../components/regions/probeBundle";
 import { formatNumber, timeAgo } from "../lib/format";
 import { useNowTick } from "../lib/useNowTick";
@@ -13,7 +24,13 @@ import "../styles/quota-regions.css";
 export function QuotaPage() {
   const { t } = useI18n();
   const qc = useQueryClient();
+  const toast = useToast();
   const [selected, setSelected] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<RegionSortKey>("headroom-asc");
+  const favorites = useFavorites("rapid-evidence:fav-quota-regions", {
+    onCapExceeded: (cap) => toast(t("toast.favoritesCap", { cap }), "info"),
+  });
   const now = useNowTick(1000);
 
   const quota = useQuery({
@@ -22,11 +39,12 @@ export function QuotaPage() {
     refetchInterval: 30000,
     staleTime: 15000,
   });
-  const summary = useQuery({
-    queryKey: ["dashboard-summary"],
-    queryFn: () => api.dashboardSummary(),
-    refetchInterval: 5000,
-  });
+  // Reuse the shell-level dashboard-summary query (same cache key) instead
+  // of declaring a parallel observer. The previous local useQuery kept a
+  // constant 5s `refetchInterval` even with the tab hidden, so the shell's
+  // `tabVisible` guard couldn't silence it \u2014 wasting up to 12
+  // requests/min on a background tab.
+  const summary = useOutletContext<UseQueryResult<DashboardSummary>>();
   const jobs = useQuery({
     queryKey: ["jobs", "quota-page"],
     queryFn: () => api.jobsList(100),
@@ -41,6 +59,41 @@ export function QuotaPage() {
     [jobs.data],
   );
   const hasScan = bundle.totalCount > 0;
+
+  const filteredProbes = useMemo(
+    () => filterProbes(bundle.probes, query),
+    [bundle.probes, query],
+  );
+  const sortedProbes = useMemo(
+    () => sortProbes(filteredProbes, sort, favorites.set),
+    [filteredProbes, sort, favorites.set],
+  );
+
+  // Tab title surfaces the count of probed regions with zero headroom.
+  const zeroCount = useMemo(
+    () => bundle.probes.filter((p) => p.observed && (p.headroom ?? 1) <= 0).length,
+    [bundle.probes],
+  );
+  useDocumentTitle(t("quota.page.title"), zeroCount > 0 ? zeroCount : null);
+
+  function exportCsv() {
+    if (sortedProbes.length === 0) {
+      toast(t("toast.csvEmpty"), "info");
+      return;
+    }
+    const headers = ["region", "used", "limit", "headroom", "observed", "favorite", "error"];
+    const data = sortedProbes.map((p) => [
+      p.region,
+      p.used ?? "",
+      p.limit ?? "",
+      p.headroom ?? "",
+      p.observed ? "yes" : "no",
+      favorites.has(p.region) ? "yes" : "no",
+      p.error ?? "",
+    ]);
+    downloadCsv(`quota-${csvDateStamp()}.csv`, headers, data);
+    toast(t("toast.csvExported", { n: data.length }), "success");
+  }
 
   return (
     <>
@@ -123,9 +176,15 @@ export function QuotaPage() {
               }}
             >
               <span>
-                {((bundle.totalUsed / bundle.totalLimit) * 100).toFixed(1)}% used
+                {t("regions.totals.bar.usedPct", {
+                  pct: ((bundle.totalUsed / bundle.totalLimit) * 100).toFixed(1),
+                })}
               </span>
-              <span>{formatNumber(bundle.totalHeadroom)} vCPU available</span>
+              <span>
+                {t("regions.totals.bar.available", {
+                  n: formatNumber(bundle.totalHeadroom),
+                })}
+              </span>
             </div>
           </div>
         )}
@@ -171,10 +230,24 @@ export function QuotaPage() {
           <span className="title">{t("regions.quotaTable.title")}</span>
           <span className="meta">{bundle.totalCount}</span>
         </div>
+        <RegionsToolbar
+          query={query}
+          onQuery={setQuery}
+          sort={sort}
+          onSort={setSort}
+          onExport={exportCsv}
+          exportDisabled={sortedProbes.length === 0}
+          matchCount={filteredProbes.length}
+          totalCount={bundle.probes.length}
+        />
         <RegionQuotaTable
-          probes={bundle.probes}
+          probes={sortedProbes}
           selected={selected}
           onSelect={setSelected}
+          lastScanAt={bundle.lastScanAt}
+          nowMs={now}
+          favorites={favorites.set}
+          onToggleFavorite={favorites.toggle}
         />
       </section>
 

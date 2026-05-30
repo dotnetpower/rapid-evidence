@@ -774,19 +774,21 @@ def _compute_scale_up_target(
     if manager is None or not manager.running:
         return None
     config = manager.scheduler.config
-    nodes = manager.scheduler._nodes.values()
-    ready_nodes = sum(1 for n in nodes if n.ready)
-    active_nodes = sum(
-        1
-        for n in nodes
-        if n.state
-        in {
-            SpotNodeState.READY,
-            SpotNodeState.BUSY,
-            SpotNodeState.PROVISIONING,
-            SpotNodeState.DRAINING,
-        }
-    )
+    # Single-pass aggregation \u2014 the previous version walked
+    # `_nodes.values()` twice (once for ready, once for active).
+    ready_nodes = 0
+    active_nodes = 0
+    _active_states = {
+        SpotNodeState.READY,
+        SpotNodeState.BUSY,
+        SpotNodeState.PROVISIONING,
+        SpotNodeState.DRAINING,
+    }
+    for node in manager.scheduler._nodes.values():
+        if node.ready:
+            ready_nodes += 1
+        if node.state in _active_states:
+            active_nodes += 1
     plan = estimate_spot_capacity(
         config, max(0, backlog), ready_nodes, active_nodes, {}
     )
@@ -865,12 +867,13 @@ def list_events(request: Request, since: str | None = None, limit: int = 200):
     manager: SpotPoolManager | None = getattr(request.app.state, "pool_manager", None)
     if manager is None or not manager.running:
         return {"events": []}
-    events = manager.snapshot().get("recent_events", []) or []
-    if since:
-        events = [e for e in events if (e.get("timestamp") or "") > since]
     # `limit` bounds payload size; clamp to a sane window.
     bounded = max(1, min(int(limit), 1000))
-    return {"events": events[-bounded:]}
+    # Hot polled path (2s from AuditPage). Use the targeted accessor so we
+    # don't allocate a full snapshot (nodes + metrics + quota + ...) on
+    # every poll just to read the bounded event buffer.
+    events = manager.recent_events(since=since, limit=bounded)
+    return {"events": events}
 
 
 @app.get("/scaling/timeline")
@@ -896,7 +899,8 @@ def quota_status(request: Request):
     manager: SpotPoolManager | None = getattr(request.app.state, "pool_manager", None)
     if manager is None or not manager.running:
         return {"observed": False}
-    quota = manager.snapshot().get("quota")
+    # Targeted accessor — avoids the snapshot rebuild on a 30s polled path.
+    quota = manager.quota_dict()
     if quota is None:
         return {"observed": False}
     return {"observed": True, **quota}
@@ -907,30 +911,11 @@ def regions_status(request: Request):
     manager: SpotPoolManager | None = getattr(request.app.state, "pool_manager", None)
     if manager is None or not manager.running:
         return {"regions": [], "as_of": utc_now_iso()}
-    snap = manager.snapshot()
-    nodes = snap.get("nodes", []) or []
-    recent_evictions = snap.get("recent_evictions", []) or []
-    evictions_by_node: dict[str, int] = {}
-    for ev in recent_evictions:
-        node_id = ev.get("node_id")
-        if node_id:
-            evictions_by_node[node_id] = evictions_by_node.get(node_id, 0) + 1
-    buckets: dict[str | None, dict[str, Any]] = {}
-    for node in nodes:
-        metadata = node.get("metadata") or {}
-        region = metadata.get("region") if isinstance(metadata, dict) else None
-        bucket = buckets.setdefault(
-            region,
-            {"region": region, "nodes": 0, "ready": 0, "busy": 0, "evictions_recent": 0},
-        )
-        bucket["nodes"] += 1
-        state = node.get("state")
-        if state == "ready":
-            bucket["ready"] += 1
-        elif state == "busy":
-            bucket["busy"] += 1
-        bucket["evictions_recent"] += evictions_by_node.get(node.get("node_id"), 0)
-    return {"regions": list(buckets.values()), "as_of": utc_now_iso()}
+    # Targeted accessor: single-pass aggregation over nodes + eviction
+    # history. The old path built a full snapshot dict-tree just to
+    # discard 90% of it.
+    summary = manager.regions_summary()
+    return {"regions": summary["regions"], "as_of": utc_now_iso()}
 
 
 @app.get("/jobs")

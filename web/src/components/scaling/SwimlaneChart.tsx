@@ -1,196 +1,294 @@
+/**
+ * SwimlaneChart — v3-2 "Tide Chart" SVG renderer.
+ *
+ * Renders a single-pane time-axis visualisation of pool capacity:
+ *   • floor (`min_ready`) and ceiling (`max_nodes`) reference bands
+ *   • active VMs as a filled area (sum of ready + busy + prov + drain)
+ *   • dashed scheduler-intent target line (`ceil(backlog/concurrency)` clamped)
+ *   • event glyphs (▲ scale_up, ▼ scale_down, ● eviction, ◇ replaced, ○ provisioned)
+ *   • right-edge "now" cursor
+ *
+ * Pure geometry lives in `swimlanePaths.ts`; this component only renders the
+ * resulting `TidePlan` and the legend bar. No recharts dependency.
+ */
 import { useMemo } from "react";
-import {
-  Area,
-  CartesianGrid,
-  ComposedChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
-import type { MetricSample, RuntimeEvent } from "../../lib/api";
+import type {
+  MetricSample,
+  PoolConfig,
+  RuntimeEvent,
+  ScaleTarget,
+} from "../../lib/api";
 import { useI18n } from "../../lib/i18n";
+import {
+  buildTidePlan,
+  TIDE_VIEW,
+  type EventMarker,
+} from "./swimlanePaths";
 
 interface Props {
   samples: MetricSample[];
   events: RuntimeEvent[];
+  config?: PoolConfig | undefined;
+  scaleTarget?: ScaleTarget | null | undefined;
 }
 
-interface Row {
-  time: string;
-  timestamp: number;
-  ready: number;
-  busy: number;
-  prov: number;
-  draining: number;
-  marker?: number;
-}
-
-function shortTime(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleTimeString("en-US", {
-    hour12: false,
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
-
-function buildRows(samples: MetricSample[], events: RuntimeEvent[]): Row[] {
-  const rows: Row[] = samples.map((s) => ({
-    time: shortTime(s.timestamp),
-    timestamp: Date.parse(s.timestamp),
-    ready: s.ready_vms ?? 0,
-    busy: s.running_vms ?? 0,
-    prov: s.provisioning_vms ?? 0,
-    draining: s.draining_vms ?? 0,
-  }));
-  if (rows.length === 0 || events.length === 0) return rows;
-  // Attach marker height (= total active VMs) on the closest sample row
-  // so the chart can render a vertical bar at the event's x position.
-  for (const ev of events) {
-    const evTs = Date.parse(ev.timestamp);
-    if (Number.isNaN(evTs)) continue;
-    let closestIdx = 0;
-    let closestDist = Math.abs(rows[0].timestamp - evTs);
-    for (let i = 1; i < rows.length; i += 1) {
-      const dist = Math.abs(rows[i].timestamp - evTs);
-      if (dist < closestDist) {
-        closestIdx = i;
-        closestDist = dist;
-      }
-    }
-    const target = rows[closestIdx];
-    const stackTotal =
-      target.ready + target.busy + target.prov + target.draining;
-    target.marker = Math.max(stackTotal, 1);
-  }
-  return rows;
-}
-
-export function SwimlaneChart({ samples, events }: Props) {
+export function SwimlaneChart({ samples, events, config, scaleTarget }: Props) {
   const { t } = useI18n();
-  const rows = useMemo(() => buildRows(samples, events), [samples, events]);
+  const plan = useMemo(
+    () => buildTidePlan(samples, events, config, scaleTarget),
+    [samples, events, config, scaleTarget],
+  );
 
-  if (rows.length < 2) {
-    return (
-      <div className="swimlane swimlane--empty">
-        {t("scaling.empty")}
-      </div>
-    );
+  if (!plan.drawable) {
+    return <div className="tide tide--empty">{t("scaling.empty")}</div>;
   }
 
   return (
-    <div className="swimlane">
-      <div className="swimlane__legend">
-        <LegendDot color="var(--ok)">{t("scaling.legend.ready")}</LegendDot>
-        <LegendDot color="var(--info)">{t("scaling.legend.busy")}</LegendDot>
-        <LegendDot color="var(--warn)">{t("scaling.legend.prov")}</LegendDot>
-        <LegendDot color="var(--violet)">{t("scaling.legend.draining")}</LegendDot>
-        <LegendDot color="var(--bad)" dashed>{t("scaling.legend.event")}</LegendDot>
+    <div className="tide">
+      <div className="tide__svg-host">
+        <svg
+          className="tide__svg"
+          viewBox={`0 0 ${TIDE_VIEW.width} ${TIDE_VIEW.height}`}
+          preserveAspectRatio="none"
+          role="img"
+          aria-label={t("scaling.tide.legend.active")}
+        >
+          <defs>
+            <linearGradient id="tide-active-fill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="rgba(79,193,255,0.55)" />
+              <stop offset="100%" stopColor="rgba(79,193,255,0.04)" />
+            </linearGradient>
+            <linearGradient id="tide-ceiling-fill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="rgba(244,135,113,0.18)" />
+              <stop offset="100%" stopColor="rgba(244,135,113,0)" />
+            </linearGradient>
+            <linearGradient id="tide-floor-fill" x1="0" y1="1" x2="0" y2="0">
+              <stop offset="0%" stopColor="rgba(137,209,133,0.16)" />
+              <stop offset="100%" stopColor="rgba(137,209,133,0)" />
+            </linearGradient>
+            <pattern
+              id="tide-grid"
+              width={Math.round((TIDE_VIEW.x1 - TIDE_VIEW.x0) / 8)}
+              height={Math.round((TIDE_VIEW.y1 - TIDE_VIEW.y0) / 6)}
+              patternUnits="userSpaceOnUse"
+            >
+              <path
+                d={`M ${Math.round((TIDE_VIEW.x1 - TIDE_VIEW.x0) / 8)} 0 L 0 0 0 ${Math.round((TIDE_VIEW.y1 - TIDE_VIEW.y0) / 6)}`}
+                fill="none"
+                stroke="rgba(255,255,255,0.025)"
+                strokeWidth={1}
+              />
+            </pattern>
+          </defs>
+
+          {/* Background grid */}
+          <rect
+            x={TIDE_VIEW.x0}
+            y={TIDE_VIEW.y0}
+            width={TIDE_VIEW.x1 - TIDE_VIEW.x0}
+            height={TIDE_VIEW.y1 - TIDE_VIEW.y0}
+            fill="url(#tide-grid)"
+          />
+
+          {/* Ceiling band + dashed line + label */}
+          {plan.ceilingY != null && plan.ceiling != null && (
+            <g>
+              <rect
+                x={TIDE_VIEW.x0}
+                y={TIDE_VIEW.y0}
+                width={TIDE_VIEW.x1 - TIDE_VIEW.x0}
+                height={Math.max(0, plan.ceilingY - TIDE_VIEW.y0)}
+                fill="url(#tide-ceiling-fill)"
+              />
+              <line
+                x1={TIDE_VIEW.x0}
+                x2={TIDE_VIEW.x1}
+                y1={plan.ceilingY}
+                y2={plan.ceilingY}
+                stroke="var(--bad)"
+                strokeDasharray="6 4"
+                strokeWidth={1}
+              />
+              <text
+                x={TIDE_VIEW.x1 - 5}
+                y={plan.ceilingY - 6}
+                textAnchor="end"
+                fontFamily="var(--mono)"
+                fontSize={10}
+                fill="var(--bad)"
+                opacity={0.85}
+              >
+                {t("scaling.tide.ceiling", { n: plan.ceiling })}
+              </text>
+            </g>
+          )}
+
+          {/* Floor band + dashed line + label */}
+          {plan.floorY != null && plan.floor != null && (
+            <g>
+              <rect
+                x={TIDE_VIEW.x0}
+                y={plan.floorY}
+                width={TIDE_VIEW.x1 - TIDE_VIEW.x0}
+                height={Math.max(0, TIDE_VIEW.y1 - plan.floorY)}
+                fill="url(#tide-floor-fill)"
+              />
+              <line
+                x1={TIDE_VIEW.x0}
+                x2={TIDE_VIEW.x1}
+                y1={plan.floorY}
+                y2={plan.floorY}
+                stroke="var(--ok)"
+                strokeDasharray="6 4"
+                strokeWidth={1}
+              />
+              <text
+                x={TIDE_VIEW.x1 - 5}
+                y={plan.floorY - 4}
+                textAnchor="end"
+                fontFamily="var(--mono)"
+                fontSize={10}
+                fill="var(--ok)"
+                opacity={0.85}
+              >
+                {t("scaling.tide.floor", { n: plan.floor })}
+              </text>
+            </g>
+          )}
+
+          {/* Y axis labels */}
+          <g fontFamily="var(--mono)" fontSize={10} fill="var(--text-dim)">
+            {plan.yTicks.map((tk) => (
+              <text key={`yt-${tk.label}-${tk.y.toFixed(1)}`} x={TIDE_VIEW.x0 - 6} y={tk.y + 4} textAnchor="end">
+                {tk.label}
+              </text>
+            ))}
+          </g>
+
+          {/* Active VMs area + top line */}
+          <path d={plan.areaPath} fill="url(#tide-active-fill)" />
+          <path d={plan.topLinePath} fill="none" stroke="var(--info)" strokeWidth={1.6} />
+
+          {/* Target dashed line (scheduler intent) */}
+          {plan.targetPath !== "" && (
+            <path
+              d={plan.targetPath}
+              fill="none"
+              stroke="var(--violet)"
+              strokeWidth={1.4}
+              strokeDasharray="4 3"
+              opacity={0.85}
+            />
+          )}
+
+          {/* Event markers */}
+          {plan.events.map((m, idx) => (
+            <EventGlyph key={`ev-${m.ts}-${idx}`} marker={m} />
+          ))}
+
+          {/* "now" cursor */}
+          <line
+            x1={plan.nowX}
+            x2={plan.nowX}
+            y1={TIDE_VIEW.y0}
+            y2={TIDE_VIEW.y1}
+            stroke="var(--info)"
+            strokeWidth={1}
+            opacity={0.8}
+          />
+          <circle cx={plan.nowX} cy={plan.nowY} r={4} fill="var(--info)" stroke="#fff" strokeWidth={1} />
+
+          {/* X axis labels */}
+          <g fontFamily="var(--mono)" fontSize={10} fill="var(--text-dim)">
+            {plan.xTicks.map((tk) => (
+              <text key={`xt-${tk.label}-${tk.x.toFixed(1)}`} x={tk.x} y={TIDE_VIEW.height - 4}>
+                {tk.label}
+              </text>
+            ))}
+            <text
+              x={plan.nowX}
+              y={TIDE_VIEW.height - 4}
+              textAnchor="end"
+              fontWeight={600}
+              fill="var(--info)"
+            >
+              {t("scaling.tide.now")}
+            </text>
+          </g>
+        </svg>
       </div>
-      <div style={{ width: "100%", height: 280 }}>
-        <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={rows} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-            <CartesianGrid stroke="#2b2b2b" vertical={false} />
-            <XAxis
-              dataKey="time"
-              tick={{ fill: "#6e6e6e", fontSize: 10 }}
-              stroke="#3c3c3c"
-              minTickGap={28}
-            />
-            <YAxis
-              tick={{ fill: "#6e6e6e", fontSize: 10 }}
-              stroke="#3c3c3c"
-              width={42}
-              allowDecimals={false}
-              label={{
-                value: "VMs",
-                angle: -90,
-                position: "insideLeft",
-                offset: 12,
-                style: { fill: "#6e6e6e", fontSize: 10 },
-              }}
-            />
-            <Tooltip
-              contentStyle={{
-                background: "#252526",
-                border: "1px solid #3c3c3c",
-                borderRadius: 4,
-                fontSize: 12,
-              }}
-              labelStyle={{ color: "#f3f3f3" }}
-              itemStyle={{ color: "#cccccc" }}
-            />
-            <Area
-              type="monotone"
-              stackId="vms"
-              dataKey="ready"
-              stroke="#89d185"
-              fill="rgba(137,209,133,0.30)"
-              isAnimationActive={false}
-            />
-            <Area
-              type="monotone"
-              stackId="vms"
-              dataKey="busy"
-              stroke="#4fc1ff"
-              fill="rgba(79,193,255,0.30)"
-              isAnimationActive={false}
-            />
-            <Area
-              type="monotone"
-              stackId="vms"
-              dataKey="prov"
-              stroke="#cca700"
-              fill="rgba(204,167,0,0.30)"
-              isAnimationActive={false}
-            />
-            <Area
-              type="monotone"
-              stackId="vms"
-              dataKey="draining"
-              stroke="#c586c0"
-              fill="rgba(197,134,192,0.30)"
-              isAnimationActive={false}
-            />
-            <Area
-              type="step"
-              dataKey="marker"
-              stroke="#f48771"
-              strokeWidth={1.2}
-              strokeDasharray="2 2"
-              fill="transparent"
-              isAnimationActive={false}
-            />
-          </ComposedChart>
-        </ResponsiveContainer>
+
+      {!plan.hasConfig && (
+        <div className="tide__notice">{t("scaling.tide.noConfig")}</div>
+      )}
+
+      <div className="tide__legend">
+        {plan.hasConfig && (
+          <span className="tide__legend-item">
+            <span className="tide__swatch tide__swatch--ceiling" />
+            {t("scaling.tide.legend.ceiling")}
+          </span>
+        )}
+        {plan.hasConfig && (
+          <span className="tide__legend-item">
+            <span className="tide__swatch tide__swatch--floor" />
+            {t("scaling.tide.legend.floor")}
+          </span>
+        )}
+        <span className="tide__legend-item">
+          <span className="tide__swatch tide__swatch--active" />
+          {t("scaling.tide.legend.active")}
+        </span>
+        {plan.targetPath !== "" && (
+          <span className="tide__legend-item">
+            <span className="tide__swatch tide__swatch--target" />
+            {t("scaling.tide.legend.target")}
+          </span>
+        )}
+        <span className="tide__legend-item">
+          <span className="tide__swatch tide__swatch--scale_up" />
+          {t("scaling.tide.legend.scale_up")}
+        </span>
+        <span className="tide__legend-item">
+          <span className="tide__swatch tide__swatch--eviction" />
+          {t("scaling.tide.legend.eviction")}
+        </span>
       </div>
     </div>
   );
 }
 
-function LegendDot({
-  color,
-  children,
-  dashed = false,
-}: {
-  color: string;
-  children: React.ReactNode;
-  dashed?: boolean;
-}) {
-  return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11 }}>
-      <span
-        style={{
-          display: "inline-block",
-          width: 14,
-          height: 0,
-          borderTop: `2px ${dashed ? "dashed" : "solid"} ${color}`,
-        }}
-      />
-      {children}
-    </span>
-  );
+function EventGlyph({ marker }: { marker: EventMarker }) {
+  const { x, y, type } = marker;
+  switch (type) {
+    case "scale_up":
+      return (
+        <polygon
+          points={`${x},${y - 14} ${x - 5},${y - 2} ${x + 5},${y - 2}`}
+          fill="var(--ok)"
+        />
+      );
+    case "scale_down":
+      return (
+        <polygon
+          points={`${x - 5},${y + 2} ${x + 5},${y + 2} ${x},${y + 14}`}
+          fill="var(--violet)"
+        />
+      );
+    case "node_evicted":
+      return <circle cx={x} cy={y} r={5} fill="var(--bad)" />;
+    case "node_replaced":
+      return (
+        <polygon
+          points={`${x},${y - 6} ${x + 6},${y} ${x},${y + 6} ${x - 6},${y}`}
+          fill="var(--violet)"
+          stroke="var(--text-strong)"
+          strokeWidth={0.6}
+        />
+      );
+    case "node_provisioned":
+      return <circle cx={x} cy={y} r={4} fill="var(--info)" stroke="#fff" strokeWidth={0.5} />;
+    default:
+      return <circle cx={x} cy={y} r={3} fill="var(--text-muted)" />;
+  }
 }

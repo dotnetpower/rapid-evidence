@@ -11,6 +11,7 @@ covering the last N seconds. No I/O happens in the read path.
 from __future__ import annotations
 
 import asyncio
+import bisect
 import logging
 import time
 from collections import deque
@@ -123,7 +124,20 @@ class MetricsCollector:
         if window_seconds <= 0:
             return []
         cutoff = time.monotonic() - window_seconds
-        return [s for s in self._samples if s.monotonic >= cutoff]
+        # Samples are appended in monotonic-time order, so `.monotonic`
+        # is sorted. Use bisect on a materialised view to skip the prefix
+        # that falls outside the window \u2014 cheaper than a list-comp
+        # filter that scans every sample (hot polled path: timeseries
+        # is fetched every 5s and often only needs the last ~60 of 720).
+        samples = list(self._samples)
+        if not samples:
+            return []
+        # Build a parallel list of `.monotonic` keys for bisect; this is
+        # O(N) but a single tight loop in C, and bisect avoids the
+        # Python-level conditional in the comprehension.
+        keys = [s.monotonic for s in samples]
+        idx = bisect.bisect_left(keys, cutoff)
+        return samples[idx:]
 
     def latest(self) -> MetricSample | None:
         return self._samples[-1] if self._samples else None

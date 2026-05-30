@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>rapid-evidence — v3 / 2. Tide Chart</title>
+<style>
+  :root {
+    --bg-app: #0d0f12;
+    --bg-side: #0a0b0d;
+    --bg-panel: #14171c;
+    --bg-elev: #1a1e25;
+    --border: #1f242c;
+    --border-strong: #2a3038;
+    --text: #d4d8de;
+    --text-strong: #f3f5f8;
+    --text-muted: #8a93a0;
+    --text-dim: #5a6270;
+    --accent: #4aa3ff;
+    --accent-glow: rgba(74, 163, 255, 0.35);
+    --ok: #5ed3a0;
+    --warn: #f4c065;
+    --bad: #ff7a7a;
+    --violet: #b794f6;
+    --mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+    --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "Pretendard", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background:
+      radial-gradient(1000px 500px at 100% 0%, rgba(74,163,255,0.06), transparent 60%),
+      var(--bg-app);
+    color: var(--text); font-family: var(--sans); font-size: 13px; line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+  }
+  .app { display: grid; grid-template-columns: 220px 1fr; grid-template-rows: 44px 1fr 24px; height: 100vh; }
+  .titlebar {
+    grid-column: 1 / 3; background: linear-gradient(180deg, rgba(20,23,28,0.95), rgba(13,15,18,0.95));
+    border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 18px; gap: 16px;
+    font-size: 12px; color: var(--text-muted);
+  }
+  .titlebar .brand { color: var(--text-strong); font-weight: 600; letter-spacing: 0.3px; }
+  .titlebar .brand::before {
+    content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: radial-gradient(circle at 30% 30%, var(--accent), #1e5cab);
+    box-shadow: 0 0 12px var(--accent-glow); margin-right: 8px; vertical-align: -1px;
+  }
+  .titlebar .crumbs { color: var(--text-dim); }
+  .titlebar .crumbs b { color: var(--text); font-weight: 500; }
+  .titlebar .right { margin-left: auto; display: flex; gap: 16px; align-items: center; }
+  .led::before { content:""; width:7px; height:7px; border-radius:50%;
+                 background: var(--ok); box-shadow: 0 0 8px rgba(94,211,160,0.5);
+                 display:inline-block; margin-right:6px; }
+
+  .sidebar { background: var(--bg-side); border-right: 1px solid var(--border); padding: 14px 6px; }
+  .nav { display: flex; align-items: center; gap: 10px; padding: 7px 12px; margin: 1px 4px;
+         color: var(--text-muted); cursor: pointer; border-radius: 5px; font-size: 13px; }
+  .nav:hover { background: var(--bg-elev); color: var(--text); }
+  .nav.active { background: linear-gradient(90deg, rgba(74,163,255,0.18), rgba(74,163,255,0.04));
+                color: var(--text-strong); box-shadow: inset 2px 0 0 var(--accent); }
+  .nav .ic { width: 14px; text-align: center; font-size: 12px; color: var(--text-dim); }
+  .nav.active .ic { color: var(--accent); }
+  .sidebar .section { color: var(--text-dim); font-size: 10px; text-transform: uppercase; letter-spacing: 1.2px;
+                      padding: 18px 14px 6px; font-weight: 600; }
+
+  .content { padding: 22px 28px 28px; overflow: auto; }
+  .page-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 18px; }
+  .page-head h1 { margin: 0; font-size: 18px; font-weight: 600; color: var(--text-strong); letter-spacing: -0.2px; }
+  .page-head .sub { color: var(--text-muted); font-size: 12px; margin-top: 4px; }
+
+  .toggle { display: flex; background: var(--bg-elev); border: 1px solid var(--border-strong);
+            border-radius: 6px; overflow: hidden; }
+  .toggle button { background: transparent; border: 0; color: var(--text-muted); font-size: 11px;
+                   padding: 6px 12px; cursor: pointer; font-family: var(--mono); }
+  .toggle button.on { background: var(--accent); color: white; }
+
+  .panel {
+    background: var(--bg-panel); border: 1px solid var(--border); border-radius: 10px;
+    overflow: hidden; position: relative; margin-bottom: 18px;
+  }
+  .panel-head { display: flex; align-items: center; justify-content: space-between;
+                padding: 14px 18px; border-bottom: 1px solid var(--border); }
+  .panel-head .title { color: var(--text-strong); font-weight: 600; font-size: 13px; letter-spacing: 0.2px; }
+  .panel-head .meta { font-size: 11px; font-family: var(--mono); color: var(--text-muted); }
+
+  /* ====== Tide chart ====== */
+  .tide-host { padding: 8px 8px 0; }
+  .tide-svg { width: 100%; height: 320px; display: block; }
+
+  .legend-bar {
+    display: flex; gap: 16px; padding: 10px 18px 14px;
+    border-top: 1px solid var(--border); font-size: 11px; color: var(--text-muted);
+    background: rgba(0,0,0,0.15);
+  }
+  .lg { display: flex; align-items: center; gap: 6px; }
+  .lg .swatch { width: 14px; height: 8px; border-radius: 2px; }
+  .lg .swatch.ceiling { background: linear-gradient(90deg, rgba(255,122,122,0.6), rgba(255,122,122,0.2)); border: 1px dashed var(--bad); }
+  .lg .swatch.floor { background: linear-gradient(90deg, rgba(94,211,160,0.6), rgba(94,211,160,0.2)); border: 1px dashed var(--ok); }
+  .lg .swatch.active { background: linear-gradient(180deg, var(--accent), rgba(74,163,255,0.15)); }
+  .lg .swatch.target { background: var(--violet); height: 2px; }
+  .lg .swatch.evict { background: var(--bad); width: 3px; height: 10px; }
+  .lg .swatch.up { background: var(--ok); width: 3px; height: 10px; }
+
+  /* ====== Right rail: decision tape ====== */
+  .grid { display: grid; grid-template-columns: 1.8fr 1fr; gap: 18px; }
+
+  .tape { padding: 0; }
+  .tape-list { padding: 6px 0; max-height: 360px; overflow-y: auto; }
+  .tape-list::-webkit-scrollbar { width: 8px; }
+  .tape-list::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
+  .tape-item { display: grid; grid-template-columns: 56px 18px 1fr; gap: 10px;
+               padding: 10px 18px; border-bottom: 1px solid var(--border); align-items: start; }
+  .tape-item .ts { font-family: var(--mono); font-size: 11px; color: var(--text-dim); padding-top: 2px; }
+  .tape-item .pill { width: 12px; height: 12px; border-radius: 3px; margin-top: 3px; }
+  .tape-item .pill.up { background: var(--ok); box-shadow: 0 0 8px rgba(94,211,160,0.5); }
+  .tape-item .pill.down { background: var(--violet); }
+  .tape-item .pill.evict { background: var(--bad); box-shadow: 0 0 8px rgba(255,122,122,0.5); }
+  .tape-item .pill.target { background: var(--accent); }
+  .tape-item .what { font-size: 12px; color: var(--text); font-weight: 500; }
+  .tape-item .why { font-size: 11px; color: var(--text-muted); margin-top: 3px; line-height: 1.5; }
+  .tape-item .why code { font-family: var(--mono); color: var(--accent); background: rgba(74,163,255,0.08);
+                         padding: 1px 5px; border-radius: 3px; font-size: 11px; }
+
+  /* ===== Bottom strip: per-state ribbons ===== */
+  .ribbons { padding: 14px 18px 18px; display: flex; flex-direction: column; gap: 8px; }
+  .ribbon-row { display: grid; grid-template-columns: 80px 1fr 80px; gap: 12px; align-items: center; }
+  .ribbon-row .lbl { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.8px; }
+  .ribbon-row .num { font-family: var(--mono); font-size: 12px; color: var(--text-strong); text-align: right; }
+  .bar-bg { position: relative; height: 12px; background: var(--bg-elev); border-radius: 3px;
+            border: 1px solid var(--border); overflow: hidden; }
+  .bar-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; }
+  .bar-fill.ready { background: linear-gradient(90deg, #2fa478, var(--ok)); }
+  .bar-fill.busy { background: linear-gradient(90deg, #2e7fd1, #7ab8ff); }
+  .bar-fill.prov { background: linear-gradient(90deg, #b8852a, var(--warn)); }
+  .bar-fill.drain { background: linear-gradient(90deg, #7a52c5, var(--violet)); }
+  .bar-tick { position: absolute; top: -3px; bottom: -3px; width: 1px; }
+  .bar-tick.min { background: var(--ok); box-shadow: 0 0 4px var(--ok); }
+  .bar-tick.max { background: var(--bad); box-shadow: 0 0 4px var(--bad); }
+  .bar-tick.target { background: var(--accent); box-shadow: 0 0 6px var(--accent); width: 2px; }
+
+  .statusbar { grid-column: 1 / 3; background: var(--bg-side); border-top: 1px solid var(--border);
+               display: flex; align-items: center; padding: 0 14px; gap: 16px; font-size: 11px;
+               color: var(--text-muted); font-family: var(--mono); }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="titlebar">
+    <span class="brand">rapid-evidence</span>
+    <span class="crumbs">scaling › <b>tide chart</b></span>
+    <span class="right">
+      <span class="led">streaming</span>
+      <span style="font-family:var(--mono)">last event 22s</span>
+      <span>한국어</span>
+    </span>
+  </div>
+
+  <div class="sidebar">
+    <div class="nav"><span class="ic">◉</span> Capacity</div>
+    <div class="nav"><span class="ic">⌁</span> Throughput</div>
+    <div class="nav"><span class="ic">≋</span> Batches</div>
+    <div class="nav"><span class="ic">⊞</span> Regions</div>
+    <div class="nav active"><span class="ic">⤬</span> Scaling</div>
+    <div class="nav"><span class="ic">⌗</span> Quota</div>
+    <div class="section">Audit</div>
+    <div class="nav"><span class="ic">≡</span> Events</div>
+    <div class="nav"><span class="ic">⚑</span> Evictions</div>
+  </div>
+
+  <div class="content">
+
+    <div class="page-head">
+      <div>
+        <h1>Tide Chart</h1>
+        <div class="sub">floor↔ceiling 사이 흐름과 scheduler 의도를 시간축으로</div>
+      </div>
+      <div class="toggle">
+        <button>15m</button>
+        <button class="on">60m</button>
+        <button>6h</button>
+        <button>24h</button>
+      </div>
+    </div>
+
+    <!-- ===== Main tide chart ===== -->
+    <section class="panel">
+      <div class="panel-head">
+        <span class="title">Pool tide · koreacentral · 60m</span>
+        <span class="meta">samples 120 · events 7</span>
+      </div>
+      <div class="tide-host">
+        <svg class="tide-svg" viewBox="0 0 760 320" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="active-fill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="rgba(74,163,255,0.55)"/>
+              <stop offset="100%" stop-color="rgba(74,163,255,0.04)"/>
+            </linearGradient>
+            <linearGradient id="ceiling-fill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="rgba(255,122,122,0.18)"/>
+              <stop offset="100%" stop-color="rgba(255,122,122,0)"/>
+            </linearGradient>
+            <linearGradient id="floor-fill" x1="0" y1="1" x2="0" y2="0">
+              <stop offset="0%" stop-color="rgba(94,211,160,0.16)"/>
+              <stop offset="100%" stop-color="rgba(94,211,160,0)"/>
+            </linearGradient>
+            <pattern id="grid" width="76" height="40" patternUnits="userSpaceOnUse">
+              <path d="M 76 0 L 0 0 0 40" fill="none" stroke="rgba(255,255,255,0.025)" stroke-width="1"/>
+            </pattern>
+          </defs>
+
+          <!-- y axis range: 0..10 VMs; max=8, min=1; chart height 260 px (40..300) -->
+          <!-- y = 300 - (v/10)*260 ; so v=0 → 300, v=10 → 40, v=8 → 92, v=1 → 274 -->
+
+          <rect x="40" y="40" width="700" height="260" fill="url(#grid)"/>
+
+          <!-- Ceiling shaded band (above max=8 → y < 92): mark forbidden zone -->
+          <rect x="40" y="40" width="700" height="52" fill="url(#ceiling-fill)"/>
+          <line x1="40" y1="92" x2="740" y2="92" stroke="var(--bad)" stroke-dasharray="6 4" stroke-width="1"/>
+          <text x="735" y="86" text-anchor="end" font-family="var(--mono)" font-size="10" fill="var(--bad)" opacity="0.85">CEILING max_nodes=8</text>
+
+          <!-- Floor shaded band (below min=1 → y > 274): warmth zone -->
+          <rect x="40" y="274" width="700" height="26" fill="url(#floor-fill)"/>
+          <line x1="40" y1="274" x2="740" y2="274" stroke="var(--ok)" stroke-dasharray="6 4" stroke-width="1"/>
+          <text x="735" y="270" text-anchor="end" font-family="var(--mono)" font-size="10" fill="var(--ok)" opacity="0.85">FLOOR min_ready=1</text>
+
+          <!-- Y axis labels -->
+          <g font-family="var(--mono)" font-size="10" fill="var(--text-dim)">
+            <text x="34" y="44" text-anchor="end">10</text>
+            <text x="34" y="96" text-anchor="end">8</text>
+            <text x="34" y="174" text-anchor="end">5</text>
+            <text x="34" y="252" text-anchor="end">2</text>
+            <text x="34" y="304" text-anchor="end">0</text>
+          </g>
+
+          <!-- Active VMs area (stacked) -->
+          <path d="M 40 274 L 100 248 L 160 222 L 220 196 L 280 144 L 340 118 L 400 92 L 460 118 L 520 144 L 580 170 L 640 196 L 700 222 L 740 222 L 740 300 L 40 300 Z"
+                fill="url(#active-fill)"/>
+          <path d="M 40 274 L 100 248 L 160 222 L 220 196 L 280 144 L 340 118 L 400 92 L 460 118 L 520 144 L 580 170 L 640 196 L 700 222 L 740 222"
+                fill="none" stroke="var(--accent)" stroke-width="1.6"/>
+
+          <!-- Target dashed line (what scheduler wanted) -->
+          <path d="M 40 274 L 100 222 L 160 196 L 220 170 L 280 118 L 340 92 L 400 92 L 460 118 L 520 144 L 580 170 L 640 196 L 700 222 L 740 222"
+                fill="none" stroke="var(--violet)" stroke-width="1.4" stroke-dasharray="4 3" opacity="0.85"/>
+
+          <!-- Event markers -->
+          <g>
+            <!-- scale_up at x=220, y top of stack=196 -->
+            <line x1="220" y1="40" x2="220" y2="300" stroke="var(--ok)" stroke-width="0.6" stroke-dasharray="2 3" opacity="0.4"/>
+            <polygon points="220,182 215,194 225,194" fill="var(--ok)" stroke="none"/>
+            <!-- scale_up at x=280 -->
+            <line x1="280" y1="40" x2="280" y2="300" stroke="var(--ok)" stroke-width="0.6" stroke-dasharray="2 3" opacity="0.4"/>
+            <polygon points="280,130 275,142 285,142" fill="var(--ok)" stroke="none"/>
+            <!-- ceiling hit at x=400 -->
+            <line x1="400" y1="40" x2="400" y2="300" stroke="var(--bad)" stroke-width="0.6" stroke-dasharray="2 3" opacity="0.4"/>
+            <circle cx="400" cy="92" r="5" fill="var(--bad)"/>
+            <text x="406" y="86" font-family="var(--mono)" font-size="10" fill="var(--bad)" font-weight="600">CEILING HIT</text>
+            <!-- evict at x=460 -->
+            <line x1="460" y1="40" x2="460" y2="300" stroke="var(--bad)" stroke-width="0.6" stroke-dasharray="2 3" opacity="0.4"/>
+            <polygon points="460,118 455,106 465,106" fill="var(--bad)" stroke="none"/>
+            <!-- scale_down at x=580 -->
+            <line x1="580" y1="40" x2="580" y2="300" stroke="var(--violet)" stroke-width="0.6" stroke-dasharray="2 3" opacity="0.4"/>
+            <polygon points="580,170 575,158 585,158" fill="var(--violet)" stroke="none" transform="rotate(180 580 164)"/>
+          </g>
+
+          <!-- Current "now" cursor at right -->
+          <line x1="700" y1="40" x2="700" y2="300" stroke="var(--accent)" stroke-width="1" opacity="0.8"/>
+          <circle cx="700" cy="222" r="4" fill="var(--accent)" stroke="#fff" stroke-width="1"/>
+
+          <!-- X axis labels -->
+          <g font-family="var(--mono)" font-size="10" fill="var(--text-dim)">
+            <text x="40" y="316">14:00</text>
+            <text x="220" y="316">14:15</text>
+            <text x="400" y="316">14:30</text>
+            <text x="580" y="316">14:45</text>
+            <text x="700" y="316" font-weight="600" fill="var(--accent)">now</text>
+          </g>
+        </svg>
+      </div>
+
+      <div class="legend-bar">
+        <span class="lg"><span class="swatch ceiling"></span> ceiling 금지영역</span>
+        <span class="lg"><span class="swatch floor"></span> floor 보온영역</span>
+        <span class="lg"><span class="swatch active"></span> active VMs</span>
+        <span class="lg"><span class="swatch target"></span> target (scheduler intent)</span>
+        <span class="lg"><span class="swatch up"></span> scale_up</span>
+        <span class="lg"><span class="swatch evict"></span> eviction</span>
+      </div>
+    </section>
+
+    <div class="grid">
+
+      <!-- ===== Per-state ribbons (current snapshot) ===== -->
+      <section class="panel">
+        <div class="panel-head">
+          <span class="title">Current snapshot · normalized to max</span>
+          <span class="meta">|=floor &nbsp; ▮=target &nbsp; |=ceiling</span>
+        </div>
+        <div class="ribbons">
+          <!-- max=8. positions on bar: min=12.5%, target=75%, max=100% -->
+          <div class="ribbon-row">
+            <span class="lbl">ready</span>
+            <div class="bar-bg">
+              <div class="bar-fill ready" style="width: 25%"></div>
+              <span class="bar-tick min" style="left: 12.5%"></span>
+              <span class="bar-tick target" style="left: 75%"></span>
+              <span class="bar-tick max" style="left: 100%"></span>
+            </div>
+            <span class="num">2 / 8</span>
+          </div>
+          <div class="ribbon-row">
+            <span class="lbl">busy</span>
+            <div class="bar-bg">
+              <div class="bar-fill busy" style="width: 37.5%"></div>
+              <span class="bar-tick min" style="left: 12.5%"></span>
+              <span class="bar-tick target" style="left: 75%"></span>
+              <span class="bar-tick max" style="left: 100%"></span>
+            </div>
+            <span class="num">3 / 8</span>
+          </div>
+          <div class="ribbon-row">
+            <span class="lbl">provisioning</span>
+            <div class="bar-bg">
+              <div class="bar-fill prov" style="width: 12.5%"></div>
+              <span class="bar-tick min" style="left: 12.5%"></span>
+              <span class="bar-tick target" style="left: 75%"></span>
+              <span class="bar-tick max" style="left: 100%"></span>
+            </div>
+            <span class="num">1 / 8</span>
+          </div>
+          <div class="ribbon-row">
+            <span class="lbl">draining</span>
+            <div class="bar-bg">
+              <div class="bar-fill drain" style="width: 0%"></div>
+              <span class="bar-tick min" style="left: 12.5%"></span>
+              <span class="bar-tick target" style="left: 75%"></span>
+              <span class="bar-tick max" style="left: 100%"></span>
+            </div>
+            <span class="num">0 / 8</span>
+          </div>
+          <div class="ribbon-row" style="margin-top:6px; padding-top:8px; border-top:1px dashed var(--border);">
+            <span class="lbl" style="color:var(--text-strong)">총 active</span>
+            <div class="bar-bg" style="height:14px;">
+              <div class="bar-fill" style="width:75%; background: linear-gradient(90deg, rgba(74,163,255,0.7), var(--accent));"></div>
+              <span class="bar-tick min" style="left: 12.5%"></span>
+              <span class="bar-tick target" style="left: 75%"></span>
+              <span class="bar-tick max" style="left: 100%"></span>
+            </div>
+            <span class="num" style="color:var(--accent);">6 / 8</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== Decision tape ===== -->
+      <section class="panel tape">
+        <div class="panel-head">
+          <span class="title">Decision tape · last 60m</span>
+          <span class="meta">7 events</span>
+        </div>
+        <div class="tape-list">
+          <div class="tape-item">
+            <span class="ts">14:32:08</span><span class="pill evict"></span>
+            <div>
+              <div class="what">eviction · node spot-12</div>
+              <div class="why"><code>spot_preempted</code> · 4 tasks requeued · auto-replace 시작됨</div>
+            </div>
+          </div>
+          <div class="tape-item">
+            <span class="ts">14:30:00</span><span class="pill target"></span>
+            <div>
+              <div class="what">ceiling hit · target = max_nodes</div>
+              <div class="why">백로그 <code>32</code>건 · target <code>8</code> · overflow <code>0</code></div>
+            </div>
+          </div>
+          <div class="tape-item">
+            <span class="ts">14:25:42</span><span class="pill up"></span>
+            <div>
+              <div class="what">scale_up · +2 nodes</div>
+              <div class="why">tasks <code>24</code> ÷ concurrency <code>4</code> = target <code>6</code></div>
+            </div>
+          </div>
+          <div class="tape-item">
+            <span class="ts">14:20:15</span><span class="pill up"></span>
+            <div>
+              <div class="what">scale_up · +1 node</div>
+              <div class="why">batch <code>media-2026-q2</code> 시작 · scale_up_batch 제한으로 1대만</div>
+            </div>
+          </div>
+          <div class="tape-item">
+            <span class="ts">14:12:03</span><span class="pill down"></span>
+            <div>
+              <div class="what">scale_down · −1 node</div>
+              <div class="why">idle <code>620s</code> > idle_timeout <code>600s</code></div>
+            </div>
+          </div>
+          <div class="tape-item">
+            <span class="ts">14:05:31</span><span class="pill down"></span>
+            <div>
+              <div class="what">scale_down · −1 node</div>
+              <div class="why">target <code>3</code> < active <code>4</code></div>
+            </div>
+          </div>
+          <div class="tape-item">
+            <span class="ts">14:00:00</span><span class="pill up"></span>
+            <div>
+              <div class="what">pool warmed to floor</div>
+              <div class="why">min_ready <code>1</code> 충족</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+
+  </div>
+
+  <div class="statusbar">
+    <span>● pool healthy</span>
+    <span>heartbeat 15s</span>
+    <span>reconcile 30s</span>
+    <span style="margin-left:auto">v3-2 tide-chart · concept</span>
+  </div>
+
+</div>
+</body>
+</html>

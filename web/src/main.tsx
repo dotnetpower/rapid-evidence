@@ -17,6 +17,7 @@ const RegionsPage = lazy(() =>
 import { I18nProvider } from "./lib/i18n";
 import "./styles/tokens.css";
 import "./styles/app.css";
+import "./styles/polish.css";
 
 const queryClient = new QueryClient({
   defaultOptions: {

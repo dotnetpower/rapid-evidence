@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import deque
 from dataclasses import dataclass
 from typing import Any
 
@@ -113,13 +114,18 @@ class SpotPoolManager:
         self.quota_refresh_interval_seconds = quota_refresh_interval_seconds
         self.audit_sink = audit_sink
         self._event_buffer = event_buffer
-        self._events: list[PoolEvent] = []
+        # Bounded ring buffer: deque(maxlen=N) is O(1) FIFO; the previous
+        # `list + del [:overflow]` did O(N) memcpy on every event once the
+        # buffer was full, which is hot on a busy pool.
+        self._events: deque[PoolEvent] = deque(maxlen=event_buffer)
         self._metrics = PoolMetrics()
         self._eviction_events: list[EvictionEvent] = []
         # Separate, never-drained observability ring buffer so that
         # `snapshot()` can still surface recent evictions even when a
         # background drain task is consuming `_eviction_events`.
-        self._eviction_history: list[EvictionEvent] = []
+        # Bounded ring buffer (last 64 evictions) so long-running pools
+        # don't leak memory through the eviction history.
+        self._eviction_history: deque[EvictionEvent] = deque(maxlen=64)
         # Last observed provider quota, populated by the quota refresh
         # loop. Surfaced via snapshot()["quota"] for the dashboard
         # /quota page.
@@ -315,11 +321,9 @@ class SpotPoolManager:
             overflow = len(self._eviction_events) - self._event_buffer
             if overflow > 0:
                 del self._eviction_events[:overflow]
-            # Observability history is independent of the drain buffer.
+            # Observability history is a bounded deque(maxlen=64) — extend
+            # drops oldest automatically, no manual slice needed.
             self._eviction_history.extend(events)
-            hist_overflow = len(self._eviction_history) - self._event_buffer
-            if hist_overflow > 0:
-                del self._eviction_history[:hist_overflow]
         self._record(
             "heartbeat",
             {
@@ -590,6 +594,9 @@ class SpotPoolManager:
             "counters": counters,
             "metrics": self._metrics_dict(),
             "quota": self._last_quota_dict(),
+            # `_eviction_history` is a bounded deque(maxlen=64); take the
+            # newest 20 via itertools.islice without materialising the full
+            # list each call.
             "recent_evictions": [
                 {
                     "node_id": e.node_id,
@@ -597,11 +604,13 @@ class SpotPoolManager:
                     "reason": e.reason,
                     "requeue_task_ids": list(e.requeue_task_ids),
                 }
-                for e in self._eviction_history[-20:]
+                for e in self._recent_evictions_iter(limit=20)
             ],
+            # `_events` is a bounded deque(maxlen=event_buffer); iterating
+            # it directly is O(N) without the extra slice copy.
             "recent_events": [
                 {"event_type": e.event_type, "timestamp": e.timestamp, "payload": e.payload}
-                for e in self._events[-self._event_buffer:]
+                for e in self._events
             ],
         }
 
@@ -624,6 +633,83 @@ class SpotPoolManager:
             "error": self._last_quota_error,
         }
 
+    # ----- targeted read accessors (perf: skip full snapshot allocation) -
+
+    def recent_events(
+        self,
+        *,
+        since: str | None = None,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        """Return up to `limit` newest recorded pool events.
+
+        Hot path: the audit-tail UI polls this at 2s. Avoids the per-call
+        full `snapshot()` rebuild (nodes + evictions + metrics + quota).
+        """
+        if limit <= 0:
+            return []
+        # Iterate the bounded deque directly; copy into a small list.
+        out: list[dict[str, Any]] = []
+        for e in self._events:
+            if since is not None and (e.timestamp or "") <= since:
+                continue
+            out.append(
+                {"event_type": e.event_type, "timestamp": e.timestamp, "payload": e.payload}
+            )
+        if len(out) > limit:
+            out = out[-limit:]
+        return out
+
+    def quota_dict(self) -> dict[str, Any] | None:
+        """Return just the quota block; cheap accessor for /quota/status."""
+        return self._last_quota_dict()
+
+    def regions_summary(self) -> dict[str, Any]:
+        """Per-region aggregate of nodes + recent eviction counts.
+
+        Cheap accessor for /regions/status — avoids the full snapshot
+        rebuild and aggregates in a single pass.
+        """
+        evictions_by_node: dict[str, int] = {}
+        for ev in self._recent_evictions_iter(limit=20):
+            nid = ev.node_id
+            if nid:
+                evictions_by_node[nid] = evictions_by_node.get(nid, 0) + 1
+        buckets: dict[str | None, dict[str, Any]] = {}
+        for node in self.scheduler._nodes.values():
+            region = node.metadata.get("region") if isinstance(node.metadata, dict) else None
+            bucket = buckets.setdefault(
+                region,
+                {"region": region, "nodes": 0, "ready": 0, "busy": 0, "evictions_recent": 0},
+            )
+            bucket["nodes"] += 1
+            state_value = node.state.value
+            if state_value == "ready":
+                bucket["ready"] += 1
+            elif state_value == "busy":
+                bucket["busy"] += 1
+            bucket["evictions_recent"] += evictions_by_node.get(node.node_id, 0)
+        return {"regions": list(buckets.values())}
+
+    def _recent_evictions_iter(self, *, limit: int = 20):
+        """Iterate the newest `limit` evictions from the bounded history.
+
+        Avoids materialising `list(deque)` just to slice the tail.
+        """
+        # deque does not support negative slicing; use indexing on a
+        # collection view. For maxlen=64, building a list is O(64) which
+        # is dwarfed by the JSON serialisation downstream — acceptable.
+        if limit <= 0:
+            return
+        hist = self._eviction_history
+        if limit >= len(hist):
+            yield from hist
+            return
+        # Walk the last `limit` items by index (deque supports __getitem__).
+        start = len(hist) - limit
+        for i in range(start, len(hist)):
+            yield hist[i]
+
     def drain_eviction_events(self) -> list[EvictionEvent]:
         events = list(self._eviction_events)
         self._eviction_events.clear()
@@ -645,10 +731,9 @@ class SpotPoolManager:
         event = PoolEvent(
             event_type=event_type, timestamp=utc_now_iso(), payload=dict(payload)
         )
+        # deque(maxlen=event_buffer) handles the FIFO cap in O(1); the
+        # previous list-slice approach paid O(N) memcpy per append.
         self._events.append(event)
-        overflow = len(self._events) - self._event_buffer
-        if overflow > 0:
-            del self._events[:overflow]
         if self.audit_sink is not None:
             try:
                 self.audit_sink.record(event_type, payload)

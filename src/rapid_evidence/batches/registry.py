@@ -136,8 +136,10 @@ class BatchRecord:
     # at the same FIFO limit as `history` to bound memory on long batches.
     evicted_request_ids: list[str] = field(default_factory=list)
     # Append-only event log surfaced via GET /batches/{id}/timeline.
-    # Capped FIFO; oldest events drop when over the limit.
-    history: list[dict[str, Any]] = field(default_factory=list)
+    # Capped FIFO via deque(maxlen) \u2014 O(1) per append, no manual slice.
+    history: deque[dict[str, Any]] = field(
+        default_factory=lambda: deque(maxlen=_HISTORY_MAX_EVENTS)
+    )
     # Monotonic timestamps of completed-or-failed requests, for throughput.
     _completion_log: deque[float] = field(default_factory=deque, repr=False)
     _task: asyncio.Task[None] | None = field(default=None, repr=False)
@@ -162,6 +164,7 @@ class BatchRecord:
             self._completion_log.popleft()
 
     def record_event(self, event_type: str, payload: dict[str, Any] | None = None) -> None:
+        # deque(maxlen=_HISTORY_MAX_EVENTS) handles the FIFO cap in O(1).
         self.history.append(
             {
                 "timestamp": utc_now_iso(),
@@ -169,9 +172,6 @@ class BatchRecord:
                 "payload": dict(payload or {}),
             }
         )
-        overflow = len(self.history) - _HISTORY_MAX_EVENTS
-        if overflow > 0:
-            del self.history[:overflow]
 
     def throughput_per_second(self) -> float:
         now = time.monotonic()
@@ -242,21 +242,24 @@ class BatchExecutor:
             {"workers_target": record.workers_target, "total": record.total},
         )
         sem = asyncio.Semaphore(max(1, record.workers_target))
-        active_lock = asyncio.Lock()
 
+        # NOTE: `record.workers_active +=/-=` does not need an asyncio.Lock.
+        # asyncio is single-threaded; integer mutation between the read and
+        # write is atomic from the event loop's perspective (no `await`
+        # crossing). The lock previously here cost 2 acquire/release pairs
+        # per fetch, which is ~20k pointless lock ops on a 10k-request
+        # batch \u2014 a real hot-path bottleneck.
         async def process(req: FetchRequest) -> None:
             if record._cancel_event.is_set():
                 return
             async with sem:
                 if record._cancel_event.is_set():
                     return
-                async with active_lock:
-                    record.workers_active += 1
+                record.workers_active += 1
                 try:
                     await self._process_one(record, req)
                 finally:
-                    async with active_lock:
-                        record.workers_active -= 1
+                    record.workers_active -= 1
 
         tasks = [asyncio.create_task(process(req)) for req in record.requests]
         try:

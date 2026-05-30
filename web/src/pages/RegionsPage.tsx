@@ -1,12 +1,25 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, type UseQueryResult } from "@tanstack/react-query";
+import { useOutletContext } from "react-router-dom";
 import { api, type DashboardSummary } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import { formatNumber, timeAgo } from "../lib/format";
 import { useNowTick } from "../lib/useNowTick";
+import { useDocumentTitle } from "../lib/useDocumentTitle";
+import { useFavorites } from "../lib/useFavorites";
+import { useToast } from "../lib/useToast";
+import { downloadCsv, csvDateStamp } from "../lib/csv";
 import { RegionCard } from "../components/regions/RegionCard";
 import { RegionsMap } from "../components/regions/RegionsMap";
 import { RegionQuotaTable } from "../components/regions/RegionQuotaTable";
+import { RegionsToolbar } from "../components/regions/RegionsToolbar";
+import { RegionDetailPanel } from "../components/regions/RegionDetailPanel";
+import {
+  filterProbes,
+  filterRegions,
+  sortProbes,
+  type RegionSortKey,
+} from "../components/regions/regionFilter";
 import { extractProbeBundle } from "../components/regions/probeBundle";
 import "../styles/quota-regions.css";
 
@@ -14,8 +27,14 @@ type ViewMode = "map" | "cards";
 
 export function RegionsPage() {
   const { t } = useI18n();
+  const toast = useToast();
   const [selected, setSelected] = useState<string | null>(null);
   const [view, setView] = useState<ViewMode>("map");
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<RegionSortKey>("observed-first");
+  const favorites = useFavorites("rapid-evidence:fav-regions", {
+    onCapExceeded: (cap) => toast(t("toast.favoritesCap", { cap }), "info"),
+  });
   const now = useNowTick(1000);
 
   const regions = useQuery({
@@ -24,11 +43,10 @@ export function RegionsPage() {
     refetchInterval: 5000,
     staleTime: 3000,
   });
-  const summary = useQuery({
-    queryKey: ["dashboard-summary"],
-    queryFn: () => api.dashboardSummary(),
-    refetchInterval: 5000,
-  });
+  // Share the shell-level dashboard-summary query \u2014 the previous local
+  // observer had no `tabVisible` gate, so it kept polling on a background
+  // tab even though the shell's own observer was paused.
+  const summary = useOutletContext<UseQueryResult<DashboardSummary>>();
   const jobs = useQuery({
     queryKey: ["jobs", "regions-page"],
     queryFn: () => api.jobsList(50),
@@ -36,12 +54,31 @@ export function RegionsPage() {
     staleTime: 5000,
   });
 
-  const rows = regions.data?.regions ?? [];
+  const allRows = regions.data?.regions ?? [];
   const nodes = (summary.data as DashboardSummary | undefined)?.pool?.nodes ?? [];
   const probeBundle = useMemo(
     () => extractProbeBundle(jobs.data?.jobs ?? []),
     [jobs.data],
   );
+
+  // Apply search to BOTH the card/map list and the probe table
+  // so the user has one mental model of "what am I looking at".
+  const rows = useMemo(() => filterRegions(allRows, query), [allRows, query]);
+  const filteredProbes = useMemo(
+    () => filterProbes(probeBundle.probes, query),
+    [probeBundle.probes, query],
+  );
+  const sortedProbes = useMemo(
+    () => sortProbes(filteredProbes, sort, favorites.set),
+    [filteredProbes, sort, favorites.set],
+  );
+
+  // Tab title shows the count of regions currently in trouble (zero headroom).
+  const lowCount = useMemo(
+    () => probeBundle.probes.filter((p) => p.observed && (p.headroom ?? 1) <= 0).length,
+    [probeBundle.probes],
+  );
+  useDocumentTitle(t("regions.page.title"), lowCount > 0 ? lowCount : null);
 
   const selectedNodes = useMemo(() => {
     if (selected === null) return [];
@@ -62,6 +99,25 @@ export function RegionsPage() {
     view === "map" && probeBundle.totalCount === 0;
 
   const hasScan = probeBundle.totalCount > 0;
+
+  function exportCsv() {
+    if (sortedProbes.length === 0) {
+      toast(t("toast.csvEmpty"), "info");
+      return;
+    }
+    const headers = ["region", "used", "limit", "headroom", "observed", "favorite", "error"];
+    const data = sortedProbes.map((p) => [
+      p.region,
+      p.used ?? "",
+      p.limit ?? "",
+      p.headroom ?? "",
+      p.observed ? "yes" : "no",
+      favorites.has(p.region) ? "yes" : "no",
+      p.error ?? "",
+    ]);
+    downloadCsv(`regions-${csvDateStamp()}.csv`, headers, data);
+    toast(t("toast.csvExported", { n: data.length }), "success");
+  }
 
   return (
     <>
@@ -144,6 +200,12 @@ export function RegionsPage() {
             selected={selected}
             onSelect={(r) => setSelected(r)}
           />
+          <div className="region-legend" aria-label={t("regions.legend.title")}>
+            <span><span className="swatch healthy" />{t("regions.legend.healthy")}</span>
+            <span><span className="swatch busy" />{t("regions.legend.busy")}</span>
+            <span><span className="swatch evicting" />{t("regions.legend.evicting")}</span>
+            <span><span className="swatch unknown" />{t("regions.legend.unknown")}</span>
+          </div>
         </div>
       ) : rows.length === 0 ? (
         <div className="panel">
@@ -172,66 +234,33 @@ export function RegionsPage() {
             {probeBundle.totalCount}
           </span>
         </div>
+        <RegionsToolbar
+          query={query}
+          onQuery={setQuery}
+          sort={sort}
+          onSort={setSort}
+          onExport={exportCsv}
+          exportDisabled={sortedProbes.length === 0}
+          matchCount={filteredProbes.length}
+          totalCount={probeBundle.probes.length}
+        />
         <RegionQuotaTable
-          probes={probeBundle.probes}
+          probes={sortedProbes}
           selected={selected}
           onSelect={setSelected}
+          lastScanAt={probeBundle.lastScanAt}
+          nowMs={now}
+          favorites={favorites.set}
+          onToggleFavorite={favorites.toggle}
         />
       </section>
 
       {selected !== null && (
-        <div className="panel" style={{ marginTop: 16 }}>
-          <div className="panel-head">
-            <span className="title">
-              {t("regions.nodes_detail", {
-                region: selected === "__unknown__" ? t("regions.unknown") : selected,
-              })}
-            </span>
-            <span className="meta">
-              {selectedProbe?.observed
-                ? `${selectedProbe.used ?? "—"}/${selectedProbe.limit ?? "—"} · headroom ${selectedProbe.headroom ?? "—"}`
-                : `${selectedNodes.length}`}
-            </span>
-          </div>
-          {selectedProbe?.error && (
-            <div className="info-banner" style={{ margin: 12, color: "var(--bad, #e06c75)" }}>
-              {selectedProbe.error}
-            </div>
-          )}
-          {selectedNodes.length === 0 ? (
-            <div className="empty" style={{ padding: 16, opacity: 0.7 }}>
-              {t("regions.empty")}
-            </div>
-          ) : (
-            <table className="batches">
-              <thead>
-                <tr>
-                  <th style={{ width: "30%" }}>{t("regions.col.id")}</th>
-                  <th style={{ width: "20%" }}>{t("regions.col.state")}</th>
-                  <th>{t("regions.col.outbound")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {selectedNodes.map((n) => (
-                  <tr key={n.node_id}>
-                    <td className="id-cell">
-                      <div className="id">{n.node_id}</div>
-                      <div className="src" style={{ opacity: 0.6 }}>
-                        {n.name}
-                      </div>
-                    </td>
-                    <td>
-                      <span className={`pill state-${n.state}`}>{n.state}</span>
-                    </td>
-                    <td style={{ fontFamily: "monospace", opacity: n.outbound_ip ? 1 : 0.4 }}>
-                      {n.outbound_ip ?? "—"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+        <RegionDetailPanel
+          selected={selected}
+          nodes={selectedNodes}
+          probe={selectedProbe}
+        />
       )}
     </>
   );

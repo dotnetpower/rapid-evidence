@@ -1,19 +1,39 @@
-import { useState } from "react";
-import { useOutletContext } from "react-router-dom";
-import type { UseQueryResult } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
+import { useNavigate, useOutletContext } from "react-router-dom";
+import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { KpiCard } from "../components/KpiCard";
 import { ThroughputChart } from "../components/ThroughputChart";
 import { PoolPanel } from "../components/PoolPanel";
 import { BatchesTable } from "../components/BatchesTable";
 import { NewBatchDialog } from "../components/NewBatchDialog";
-import type { DashboardSummary } from "../lib/api";
+import { api, type DashboardSummary } from "../lib/api";
 import { formatDuration, formatNumber, formatRate } from "../lib/format";
 import { useI18n } from "../lib/i18n";
+import { useDocumentTitle } from "../lib/useDocumentTitle";
+import { usePageVisibility } from "../lib/usePageVisibility";
+import { useCtrlOrCmdHotkey } from "../lib/useHotkey";
+
+/** Number of historical samples to render in each KPI sparkline. */
+const SPARKLINE_SAMPLES = 60;
+/** Polling window for the sparkline series — last 5 minutes. */
+const SPARKLINE_WINDOW_SECONDS = 300;
 
 export function ThroughputPage() {
   const summary = useOutletContext<UseQueryResult<DashboardSummary>>();
   const [dialogOpen, setDialogOpen] = useState(false);
   const { t } = useI18n();
+  const navigate = useNavigate();
+  const tabVisible = usePageVisibility();
+
+  // Sparkline series for KPI cards. Polled at 5 s, paused on hidden tab.
+  // Bounded series length (SPARKLINE_SAMPLES) per `.slice(-N)` below.
+  const series = useQuery({
+    queryKey: ["throughput-sparkline", SPARKLINE_WINDOW_SECONDS],
+    queryFn: () => api.metricsTimeseries(SPARKLINE_WINDOW_SECONDS),
+    refetchInterval: tabVisible ? 5000 : false,
+    refetchIntervalInBackground: false,
+    staleTime: 3000,
+  });
 
   const data = summary.data;
   const counters = data?.pool?.counters ?? {};
@@ -27,6 +47,29 @@ export function ThroughputPage() {
     Number(counters.terminating ?? 0);
   const target = data?.scale_target?.target_nodes ?? config?.max_nodes ?? 0;
   const maxNodes = config?.max_nodes ?? 0;
+
+  // Document.title shows live backlog so background tabs show pressure.
+  useDocumentTitle(t("page.throughput.title"), data?.backlog ?? null);
+
+  // Ctrl+N / Cmd+N → open New Batch dialog (skipped when typing in an input).
+  useCtrlOrCmdHotkey({ key: "n", onTrigger: () => setDialogOpen(true) });
+
+  // Extract per-KPI sparkline series from the timeseries.
+  const sparks = useMemo(() => {
+    const samples = (series.data?.samples ?? []).slice(-SPARKLINE_SAMPLES);
+    return {
+      backlog: samples.map((s) => s.backlog),
+      throughput: samples.map((s) => s.throughput_per_second),
+      activeVms: samples.map((s) =>
+        Number.isFinite(s.active_vms)
+          ? s.active_vms
+          : (s.ready_vms ?? 0) +
+            (s.running_vms ?? 0) +
+            (s.provisioning_vms ?? 0) +
+            (s.draining_vms ?? 0),
+      ),
+    };
+  }, [series.data]);
 
   return (
     <>
@@ -69,6 +112,9 @@ export function ThroughputPage() {
           value={formatNumber(data?.backlog ?? 0)}
           unit={t("kpi.backlog.unit")}
           detail={data ? t("kpi.backlog.activeBatches", { n: data.active_batches }) : "—"}
+          sparkline={sparks.backlog}
+          onClick={() => navigate("/batches?filter=active")}
+          clickHint={t("kpi.drill.hint")}
         />
         <KpiCard
           label={t("kpi.tp.label")}
@@ -79,6 +125,7 @@ export function ThroughputPage() {
               ? t("kpi.tp.activeSamples", { n: data.latest_sample.active_batches })
               : "—"
           }
+          sparkline={sparks.throughput}
         />
         <KpiCard
           label={t("kpi.drain.label")}
@@ -97,6 +144,8 @@ export function ThroughputPage() {
               ? "ok"
               : "neutral"
           }
+          onClick={() => navigate("/scaling")}
+          clickHint={t("kpi.drill.hint")}
         />
         <KpiCard
           label={t("kpi.spot.label")}
@@ -113,6 +162,9 @@ export function ThroughputPage() {
               : "—"
           }
           tone={Number(counters.provisioning ?? 0) > 0 ? "warn" : "neutral"}
+          sparkline={sparks.activeVms}
+          onClick={() => navigate("/scaling")}
+          clickHint={t("kpi.drill.hint")}
         />
       </div>
 
@@ -127,3 +179,4 @@ export function ThroughputPage() {
     </>
   );
 }
+

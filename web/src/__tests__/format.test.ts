@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { formatDuration, formatNumber, formatPercent, formatRate } from "../lib/format";
+import {
+  formatDuration,
+  formatNumber,
+  formatPercent,
+  formatRate,
+  timeAgoLocalized,
+} from "../lib/format";
 
 describe("format helpers", () => {
   it("formats numbers with thousand separators", () => {
@@ -31,5 +37,38 @@ describe("format helpers", () => {
     expect(formatPercent(99.4)).toBe("99%");
     expect(formatPercent(7.1)).toBe("7.1%");
     expect(formatPercent(null)).toBe("—");
+  });
+
+  describe("timeAgoLocalized", () => {
+    const now = Date.parse("2026-05-30T08:00:00Z");
+    const isoBefore = (sec: number) => new Date(now - sec * 1000).toISOString();
+
+    it("returns em dash for missing or invalid input", () => {
+      expect(timeAgoLocalized(null, now, "en")).toBe("—");
+      expect(timeAgoLocalized(undefined, now, "ko")).toBe("—");
+      expect(timeAgoLocalized("not-a-date", now, "ko")).toBe("—");
+    });
+
+    it("uses English 'ago' suffix for en", () => {
+      expect(timeAgoLocalized(isoBefore(0), now, "en")).toBe("< 1s ago");
+      expect(timeAgoLocalized(isoBefore(7), now, "en")).toBe("7s ago");
+      expect(timeAgoLocalized(isoBefore(75), now, "en")).toBe("1m 15s ago");
+      expect(timeAgoLocalized(isoBefore(3700), now, "en")).toBe("1h 1m ago");
+    });
+
+    it("uses Korean phrasing for ko", () => {
+      expect(timeAgoLocalized(isoBefore(0), now, "ko")).toBe("방금");
+      expect(timeAgoLocalized(isoBefore(9), now, "ko")).toBe("9초 전");
+      expect(timeAgoLocalized(isoBefore(120), now, "ko")).toBe("2분 전");
+      expect(timeAgoLocalized(isoBefore(75), now, "ko")).toBe("1분 전");
+      expect(timeAgoLocalized(isoBefore(3600), now, "ko")).toBe("1시간 전");
+      expect(timeAgoLocalized(isoBefore(3700), now, "ko")).toBe("1시간 1분 전");
+    });
+
+    it("clamps negative diffs (future timestamp) to zero", () => {
+      const futureIso = new Date(now + 5_000).toISOString();
+      expect(timeAgoLocalized(futureIso, now, "ko")).toBe("방금");
+      expect(timeAgoLocalized(futureIso, now, "en")).toBe("< 1s ago");
+    });
   });
 });

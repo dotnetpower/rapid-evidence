@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>rapid-evidence — v3 / 1. Capacity Reactor</title>
+<style>
+  :root {
+    --bg-app: #0d0f12;
+    --bg-side: #0a0b0d;
+    --bg-panel: #14171c;
+    --bg-elev: #1a1e25;
+    --bg-glass: rgba(26, 30, 37, 0.6);
+    --border: #1f242c;
+    --border-strong: #2a3038;
+    --text: #d4d8de;
+    --text-strong: #f3f5f8;
+    --text-muted: #8a93a0;
+    --text-dim: #5a6270;
+    --accent: #4aa3ff;
+    --accent-glow: rgba(74, 163, 255, 0.35);
+    --ok: #5ed3a0;
+    --ok-glow: rgba(94, 211, 160, 0.35);
+    --warn: #f4c065;
+    --warn-glow: rgba(244, 192, 101, 0.35);
+    --bad: #ff7a7a;
+    --bad-glow: rgba(255, 122, 122, 0.35);
+    --violet: #b794f6;
+    --violet-glow: rgba(183, 148, 246, 0.35);
+    --mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+    --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "Pretendard", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(74,163,255,0.08), transparent 60%),
+      radial-gradient(900px 500px at 10% 110%, rgba(183,148,246,0.06), transparent 60%),
+      var(--bg-app);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 13px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+  }
+  .app { display: grid; grid-template-columns: 220px 1fr; grid-template-rows: 44px 1fr 24px; height: 100vh; }
+
+  .titlebar {
+    grid-column: 1 / 3;
+    background: linear-gradient(180deg, rgba(20,23,28,0.95), rgba(13,15,18,0.95));
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; padding: 0 18px; gap: 16px;
+    font-size: 12px; color: var(--text-muted);
+  }
+  .titlebar .brand { color: var(--text-strong); font-weight: 600; letter-spacing: 0.3px; }
+  .titlebar .brand::before {
+    content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: radial-gradient(circle at 30% 30%, var(--accent), #1e5cab);
+    box-shadow: 0 0 12px var(--accent-glow);
+    margin-right: 8px; vertical-align: -1px;
+  }
+  .titlebar .crumbs { color: var(--text-dim); }
+  .titlebar .crumbs b { color: var(--text); font-weight: 500; }
+  .titlebar .right { margin-left: auto; display: flex; gap: 16px; align-items: center; }
+  .led::before {
+    content:""; width:7px; height:7px; border-radius:50%;
+    background: var(--ok); box-shadow: 0 0 8px var(--ok-glow);
+    display:inline-block; margin-right:6px;
+  }
+
+  .sidebar { background: var(--bg-side); border-right: 1px solid var(--border); padding: 14px 6px; }
+  .nav { display: flex; align-items: center; gap: 10px; padding: 7px 12px; margin: 1px 4px;
+         color: var(--text-muted); cursor: pointer; border-radius: 5px; font-size: 13px; }
+  .nav:hover { background: var(--bg-elev); color: var(--text); }
+  .nav.active {
+    background: linear-gradient(90deg, rgba(74,163,255,0.18), rgba(74,163,255,0.04));
+    color: var(--text-strong);
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
+  .nav .ic { width: 14px; text-align: center; font-size: 12px; color: var(--text-dim); }
+  .nav.active .ic { color: var(--accent); }
+  .sidebar .section { color: var(--text-dim); font-size: 10px; text-transform: uppercase; letter-spacing: 1.2px; padding: 18px 14px 6px; font-weight: 600; }
+
+  .content { padding: 22px 28px 28px; overflow: auto; }
+  .page-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 18px; }
+  .page-head h1 { margin: 0; font-size: 18px; font-weight: 600; color: var(--text-strong); letter-spacing: -0.2px; }
+  .page-head .sub { color: var(--text-muted); font-size: 12px; margin-top: 4px; }
+
+  .grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 18px; }
+
+  .panel {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    position: relative;
+  }
+  .panel::before {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: linear-gradient(180deg, rgba(255,255,255,0.025), transparent 30%);
+  }
+  .panel-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 18px; border-bottom: 1px solid var(--border);
+  }
+  .panel-head .title { color: var(--text-strong); font-weight: 600; font-size: 13px; letter-spacing: 0.2px; }
+  .panel-head .meta { font-size: 11px; font-family: var(--mono); color: var(--text-muted); }
+
+  /* ===== Reactor ===== */
+  .reactor-wrap { padding: 24px 18px 28px; display: flex; flex-direction: column; align-items: center; gap: 18px; }
+  .reactor-svg { width: 380px; height: 380px; filter: drop-shadow(0 8px 40px rgba(74,163,255,0.08)); }
+  .reactor-legend {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; width: 100%; max-width: 420px;
+    font-size: 11px; color: var(--text-muted);
+  }
+  .lg { display: flex; align-items: center; gap: 6px; }
+  .lg .dot { width: 8px; height: 8px; border-radius: 2px; }
+  .lg .dot.ready { background: var(--ok); box-shadow: 0 0 6px var(--ok-glow); }
+  .lg .dot.busy { background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); }
+  .lg .dot.prov { background: var(--warn); box-shadow: 0 0 6px var(--warn-glow); }
+  .lg .dot.drain { background: var(--violet); box-shadow: 0 0 6px var(--violet-glow); }
+
+  /* Center readout */
+  .center-readout { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+                    text-align: center; pointer-events: none; }
+  .center-readout .big { font-family: var(--mono); font-size: 44px; font-weight: 600; color: var(--text-strong); letter-spacing: -1px; line-height: 1; }
+  .center-readout .big .div { color: var(--text-dim); margin: 0 4px; font-weight: 300; }
+  .center-readout .big .max { color: var(--text-muted); }
+  .center-readout .label { font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--text-dim); margin-top: 6px; }
+  .center-readout .util { font-size: 11px; color: var(--ok); margin-top: 4px; font-family: var(--mono); }
+
+  .reactor-host { position: relative; width: 380px; height: 380px; }
+
+  /* ===== Decision card ===== */
+  .dc-body { padding: 18px; }
+  .dc-row { display: grid; grid-template-columns: 110px 1fr auto; gap: 12px; padding: 10px 0;
+            border-bottom: 1px dashed var(--border); align-items: center; }
+  .dc-row:last-child { border-bottom: 0; }
+  .dc-row .lbl { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; }
+  .dc-row .expr { font-family: var(--mono); font-size: 12px; color: var(--text); }
+  .dc-row .val { font-family: var(--mono); font-size: 14px; color: var(--text-strong); font-weight: 600; }
+  .dc-row .val.accent { color: var(--accent); }
+  .dc-row .val.ok { color: var(--ok); }
+  .dc-row .val.warn { color: var(--warn); }
+  .dc-row.highlight { background: linear-gradient(90deg, rgba(74,163,255,0.06), transparent); margin: 0 -18px; padding-left: 18px; padding-right: 18px; }
+
+  .why-card {
+    margin: 14px 18px 18px;
+    padding: 14px 16px;
+    border-radius: 8px;
+    background: linear-gradient(180deg, rgba(244,192,101,0.08), rgba(244,192,101,0.02));
+    border: 1px solid rgba(244,192,101,0.25);
+    font-size: 12px;
+  }
+  .why-card .ttl { color: var(--warn); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+  .why-card .body { color: var(--text); line-height: 1.55; }
+  .why-card .body code { font-family: var(--mono); color: var(--warn); background: rgba(244,192,101,0.1); padding: 1px 6px; border-radius: 3px; font-size: 11px; }
+
+  /* ===== Pulse ring ===== */
+  @keyframes pulse {
+    0%, 100% { opacity: 0.45; transform: scale(1); }
+    50% { opacity: 0.85; transform: scale(1.02); }
+  }
+  .pulse-ring { animation: pulse 2.4s ease-in-out infinite; transform-origin: center; transform-box: fill-box; }
+
+  /* ===== Marker labels around reactor ===== */
+  .ring-label { font-family: var(--mono); font-size: 10px; fill: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; }
+  .ring-label.strong { fill: var(--text-strong); font-weight: 600; }
+  .ring-label.warn { fill: var(--bad); }
+  .ring-label.ok { fill: var(--ok); }
+
+  /* Status bar */
+  .statusbar { grid-column: 1 / 3; background: var(--bg-side); border-top: 1px solid var(--border);
+               display: flex; align-items: center; padding: 0 14px; gap: 16px; font-size: 11px;
+               color: var(--text-muted); font-family: var(--mono); }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- TITLEBAR -->
+  <div class="titlebar">
+    <span class="brand">rapid-evidence</span>
+    <span class="crumbs">overview › <b>capacity reactor</b></span>
+    <span class="right">
+      <span class="led">pool live · in-memory</span>
+      <span style="font-family:var(--mono)">spike: 14:32:08</span>
+      <span>한국어</span>
+    </span>
+  </div>
+
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+    <div class="nav active"><span class="ic">◉</span> Capacity</div>
+    <div class="nav"><span class="ic">⌁</span> Throughput</div>
+    <div class="nav"><span class="ic">≋</span> Batches</div>
+    <div class="nav"><span class="ic">⊞</span> Regions</div>
+    <div class="nav"><span class="ic">⤬</span> Scaling</div>
+    <div class="nav"><span class="ic">⌗</span> Quota</div>
+    <div class="section">Audit</div>
+    <div class="nav"><span class="ic">≡</span> Events</div>
+    <div class="nav"><span class="ic">⚑</span> Evictions</div>
+  </div>
+
+  <!-- CONTENT -->
+  <div class="content">
+
+    <div class="page-head">
+      <div>
+        <h1>Capacity Reactor</h1>
+        <div class="sub">min_ready · target · max_nodes 사이의 현재 상태를 한 화면으로</div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button style="background:var(--bg-elev);border:1px solid var(--border-strong);color:var(--text);border-radius:5px;padding:7px 14px;font-size:12px;cursor:pointer;">⚙ Pool Settings</button>
+        <button style="background:linear-gradient(180deg,var(--accent),#2e7fd1);border:0;color:#fff;border-radius:5px;padding:7px 14px;font-size:12px;cursor:pointer;box-shadow:0 4px 14px var(--accent-glow);">＋ New Batch</button>
+      </div>
+    </div>
+
+    <div class="grid">
+
+      <!-- ===================== Reactor panel ===================== -->
+      <section class="panel">
+        <div class="panel-head">
+          <span class="title">Pool capacity · koreacentral</span>
+          <span class="meta">refreshed 2s ago · provider in-memory</span>
+        </div>
+
+        <div class="reactor-wrap">
+          <div class="reactor-host">
+            <svg class="reactor-svg" viewBox="0 0 200 200">
+              <!-- Defs -->
+              <defs>
+                <linearGradient id="grad-ready" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" stop-color="#5ed3a0"/>
+                  <stop offset="100%" stop-color="#2fa478"/>
+                </linearGradient>
+                <linearGradient id="grad-busy" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" stop-color="#7ab8ff"/>
+                  <stop offset="100%" stop-color="#2e7fd1"/>
+                </linearGradient>
+                <linearGradient id="grad-prov" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" stop-color="#f4c065"/>
+                  <stop offset="100%" stop-color="#b8852a"/>
+                </linearGradient>
+                <linearGradient id="grad-drain" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" stop-color="#b794f6"/>
+                  <stop offset="100%" stop-color="#7a52c5"/>
+                </linearGradient>
+                <radialGradient id="core" cx="50%" cy="50%" r="50%">
+                  <stop offset="0%" stop-color="rgba(74,163,255,0.4)"/>
+                  <stop offset="60%" stop-color="rgba(74,163,255,0.08)"/>
+                  <stop offset="100%" stop-color="rgba(74,163,255,0)"/>
+                </radialGradient>
+                <filter id="glow"><feGaussianBlur stdDeviation="1.6"/></filter>
+              </defs>
+
+              <!-- Outer dial: max_nodes ceiling -->
+              <circle cx="100" cy="100" r="88" fill="none" stroke="var(--bad)"
+                      stroke-width="0.6" stroke-dasharray="2 2" opacity="0.55"/>
+              <!-- Min_ready floor (inner ring) -->
+              <circle cx="100" cy="100" r="44" fill="none" stroke="var(--ok)"
+                      stroke-width="0.6" stroke-dasharray="2 2" opacity="0.65"/>
+              <!-- background dial -->
+              <circle cx="100" cy="100" r="72" fill="none" stroke="var(--border-strong)" stroke-width="14" opacity="0.4"/>
+
+              <!--
+                Stacked utilization arc.
+                Geometry: arc length proportional to count / max_nodes (here max=8).
+                ready=2, busy=3, prov=1, drain=0 → total active = 6 / 8 = 270°
+                Stroke arcs drawn from -90deg origin, clockwise.
+                We use stroke-dasharray on a circumference C = 2πr = 2π·72 ≈ 452.4
+                slices: ready 2/8=0.25*C=113, busy 3/8=0.375*C=170, prov 1/8=0.125*C=57
+              -->
+              <g transform="rotate(-90 100 100)">
+                <!-- ready -->
+                <circle cx="100" cy="100" r="72" fill="none" stroke="url(#grad-ready)"
+                        stroke-width="14" stroke-linecap="butt"
+                        stroke-dasharray="113 339" stroke-dashoffset="0" filter="url(#glow)"/>
+                <!-- busy -->
+                <circle cx="100" cy="100" r="72" fill="none" stroke="url(#grad-busy)"
+                        stroke-width="14" stroke-linecap="butt"
+                        stroke-dasharray="170 282" stroke-dashoffset="-113"/>
+                <!-- prov -->
+                <circle cx="100" cy="100" r="72" fill="none" stroke="url(#grad-prov)"
+                        stroke-width="14" stroke-linecap="butt"
+                        stroke-dasharray="57 395" stroke-dashoffset="-283"/>
+              </g>
+
+              <!-- Target marker: glowing arc at 270° (= target 6 of 8) -->
+              <g transform="rotate(-90 100 100)" class="pulse-ring">
+                <circle cx="100" cy="100" r="82" fill="none" stroke="var(--accent)"
+                        stroke-width="1.6" stroke-dasharray="2 514" stroke-dashoffset="-339"
+                        opacity="0.9"/>
+              </g>
+
+              <!-- Core glow -->
+              <circle cx="100" cy="100" r="38" fill="url(#core)"/>
+
+              <!-- Tick marks for each VM slot (8 slots at outer ring) -->
+              <g stroke="var(--text-dim)" stroke-width="0.4">
+                <line x1="100" y1="6" x2="100" y2="12" />
+                <line x1="100" y1="194" x2="100" y2="188" />
+                <line x1="6" y1="100" x2="12" y2="100" />
+                <line x1="194" y1="100" x2="188" y2="100" />
+                <line x1="33" y1="33" x2="38" y2="38" />
+                <line x1="167" y1="33" x2="162" y2="38" />
+                <line x1="33" y1="167" x2="38" y2="162" />
+                <line x1="167" y1="167" x2="162" y2="162" />
+              </g>
+
+              <!-- Labels around the ring -->
+              <text x="100" y="195" text-anchor="middle" class="ring-label warn">CEILING max=8</text>
+              <text x="100" y="135" text-anchor="middle" class="ring-label ok">FLOOR min=1</text>
+              <text x="100" y="14" text-anchor="middle" class="ring-label strong">TARGET 6</text>
+            </svg>
+
+            <!-- Center readout overlay -->
+            <div class="center-readout">
+              <div class="big"><span>6</span><span class="div">/</span><span class="max">8</span></div>
+              <div class="label">active VMs</div>
+              <div class="util">75% capacity · 1 headroom</div>
+            </div>
+          </div>
+
+          <div class="reactor-legend">
+            <span class="lg"><span class="dot ready"></span> ready 2</span>
+            <span class="lg"><span class="dot busy"></span> busy 3</span>
+            <span class="lg"><span class="dot prov"></span> provisioning 1</span>
+            <span class="lg"><span class="dot drain"></span> draining 0</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== Decision card panel ===================== -->
+      <section class="panel">
+        <div class="panel-head">
+          <span class="title">Scheduler decision · live</span>
+          <span class="meta">next tick in 8s</span>
+        </div>
+
+        <div class="dc-body">
+          <div class="dc-row">
+            <span class="lbl">Inflight</span>
+            <span class="expr">tasks in queue + busy</span>
+            <span class="val">24</span>
+          </div>
+          <div class="dc-row">
+            <span class="lbl">÷ concurrency</span>
+            <span class="expr">per_node_concurrency = 4</span>
+            <span class="val">⌈ 24÷4 ⌉ = 6</span>
+          </div>
+          <div class="dc-row highlight">
+            <span class="lbl">Clamped</span>
+            <span class="expr">max(min=1, min(max=8, 6))</span>
+            <span class="val accent">target 6</span>
+          </div>
+          <div class="dc-row">
+            <span class="lbl">Active now</span>
+            <span class="expr">ready+busy+prov+drain</span>
+            <span class="val ok">6</span>
+          </div>
+          <div class="dc-row">
+            <span class="lbl">Scale up</span>
+            <span class="expr">target − active (batch ≤ 1)</span>
+            <span class="val">+0</span>
+          </div>
+          <div class="dc-row">
+            <span class="lbl">Overflow</span>
+            <span class="expr">tasks beyond max capacity</span>
+            <span class="val">0</span>
+          </div>
+        </div>
+
+        <div class="why-card">
+          <div class="ttl">Why not scale higher?</div>
+          <div class="body">
+            target 이 <code>max_nodes=8</code> 보다 작아 ceiling 에 닿지 않았고,
+            quota 잔여 <code>14 vCPU</code> 도 충분합니다. 다음 reconcile tick(8s 후)에
+            현재 active 가 그대로 유지되면 idle 회수가 시작됩니다.
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+
+  <div class="statusbar">
+    <span>● pool healthy</span>
+    <span>heartbeat 15s</span>
+    <span>reconcile 30s</span>
+    <span style="margin-left:auto">v3-1 capacity-reactor · concept</span>
+  </div>
+
+</div>
+</body>
+</html>

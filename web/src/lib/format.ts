@@ -33,3 +33,31 @@ export function timeAgo(iso: string | null | undefined, nowMs: number = Date.now
   const seconds = Math.max(0, Math.round((nowMs - ts) / 1000));
   return formatDuration(seconds) + " ago";
 }
+
+/**
+ * Locale-aware "X ago" string. Examples:
+ *   en: "9s ago", "2m ago", "1h 5m ago"
+ *   ko: "9초 전", "2분 전", "1시간 5분 전"
+ * Returns "—" for missing or unparseable input.
+ */
+export function timeAgoLocalized(
+  iso: string | null | undefined,
+  nowMs: number,
+  lang: "en" | "ko",
+): string {
+  if (!iso) return "—";
+  const ts = Date.parse(iso);
+  if (Number.isNaN(ts)) return "—";
+  const seconds = Math.max(0, Math.round((nowMs - ts) / 1000));
+  if (lang !== "ko") return formatDuration(seconds) + " ago";
+  // Korean form: "방금 / N초 전 / N분 / N시간 N분 전"
+  if (seconds < 1) return "방금";
+  if (seconds < 60) return `${seconds}초 전`;
+  const total = Math.round(seconds);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  if (h > 0) {
+    return m > 0 ? `${h}시간 ${m}분 전` : `${h}시간 전`;
+  }
+  return `${m}분 전`;
+}

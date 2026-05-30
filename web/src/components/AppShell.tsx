@@ -1,25 +1,33 @@
+import { useMemo, useState } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { formatDuration, formatNumber, formatRate, timeAgo } from "../lib/format";
 import { useI18n } from "../lib/i18n";
 import { useNowTick } from "../lib/useNowTick";
+import { useKeyboardNav } from "../lib/useKeyboardNav";
+import { usePageVisibility } from "../lib/usePageVisibility";
+import { ToastContainer } from "./ToastContainer";
+import { ShortcutHelp } from "./ShortcutHelp";
 
 interface NavItem {
   to: string;
   labelKey: string;
   icon: string;
+  /** Single-letter key used after the `g` leader for nav shortcuts. */
+  hotkey?: string;
   disabled?: boolean;
 }
 
 const navItems: NavItem[] = [
-  { to: "/", labelKey: "title.crumb.throughput", icon: "≡" },
-  { to: "/regions", labelKey: "title.crumb.regions", icon: "▦" },
-  { to: "/batches", labelKey: "title.crumb.batches", icon: "⛁" },
-  { to: "/scaling", labelKey: "title.crumb.scaling", icon: "▥" },
-  { to: "/quota", labelKey: "title.crumb.quota", icon: "▤" },
-  { to: "/audit", labelKey: "title.crumb.audit", icon: "⏚" },
+  { to: "/", labelKey: "title.crumb.throughput", icon: "≡", hotkey: "t" },
+  { to: "/regions", labelKey: "title.crumb.regions", icon: "▦", hotkey: "r" },
+  { to: "/batches", labelKey: "title.crumb.batches", icon: "⛁", hotkey: "b" },
+  { to: "/scaling", labelKey: "title.crumb.scaling", icon: "▥", hotkey: "s" },
+  { to: "/quota", labelKey: "title.crumb.quota", icon: "▤", hotkey: "q" },
+  { to: "/audit", labelKey: "title.crumb.audit", icon: "⏚", hotkey: "a" },
 ];
+
 
 function crumbKey(pathname: string): string {
   if (pathname === "/" || pathname === "") return "title.crumb.throughput";
@@ -31,18 +39,39 @@ export function AppShell() {
   const location = useLocation();
   const { t, lang, setLang } = useI18n();
   const now = useNowTick(1000);
+  const tabVisible = usePageVisibility();
+  const [helpOpen, setHelpOpen] = useState(false);
+
+  // Wire global "g + key" navigation shortcuts + "?" help.
+  // MUST be memoised — `useKeyboardNav` keys its effect on this object's
+  // identity, so a fresh literal every render would re-bind the document
+  // listener and wipe the in-flight leader-key state, making "g t"
+  // unreachable whenever a parent re-rendered between the two keypresses.
+  const navShortcuts = useMemo(
+    () =>
+      navItems.reduce<Record<string, { path: string }>>((acc, item) => {
+        if (item.hotkey && !item.disabled) {
+          acc[item.hotkey] = { path: item.to };
+        }
+        return acc;
+      }, {}),
+    [],
+  );
+  useKeyboardNav(navShortcuts, () => setHelpOpen((prev) => !prev));
 
   const summary = useQuery({
     queryKey: ["dashboard-summary"],
     queryFn: () => api.dashboardSummary(),
-    refetchInterval: 2000,
+    // Pause refetch when tab is in the background — stops 30 req/min
+    // running for an unattended dashboard.
+    refetchInterval: tabVisible ? 2000 : false,
     refetchIntervalInBackground: false,
     staleTime: 1500,
   });
   const jobs = useQuery({
     queryKey: ["jobs", "appshell"],
     queryFn: () => api.jobsList(50),
-    refetchInterval: 5000,
+    refetchInterval: tabVisible ? 5000 : false,
     refetchIntervalInBackground: false,
     staleTime: 3000,
   });
@@ -172,10 +201,21 @@ export function AppShell() {
             </span>
           )}
         </Link>
+        <button
+          type="button"
+          className="seg seg-btn"
+          title={t("shortcut.help.tip")}
+          aria-label={t("shortcut.help")}
+          onClick={() => setHelpOpen(true)}
+        >
+          ⌨ ?
+        </button>
         <span className="seg" style={{ marginLeft: "auto" }}>
           {t("bar.lastSample")} {timeAgo(sample?.timestamp ?? null, now)}
         </span>
       </div>
+      <ToastContainer />
+      {helpOpen && <ShortcutHelp onClose={() => setHelpOpen(false)} />}
     </div>
   );
 }

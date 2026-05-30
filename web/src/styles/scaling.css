@@ -1,75 +1,275 @@
-/* Styles owned by the Scaling Timeline page (SwimlaneChart + EventMarkerList).
+/* Styles owned by the Scaling Timeline page — v3-2 "Tide Chart".
    Isolated from app.css to avoid races with parallel sessions editing that
    shared file. */
 
-.swimlane {
+/* ============================================================
+   Tide chart (SwimlaneChart.tsx) — SVG-based
+   ============================================================ */
+.tide {
   width: 100%;
 }
-.swimlane--empty {
+.tide--empty {
   padding: 32px;
   color: var(--text-muted);
   text-align: center;
   font-size: 12px;
 }
-.swimlane__legend {
+.tide__svg-host {
+  padding: 8px 8px 0;
+}
+.tide__svg {
+  width: 100%;
+  height: 320px;
+  display: block;
+}
+.tide__legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 14px;
+  gap: 16px;
+  padding: 10px 18px 14px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
   color: var(--text-muted);
-  padding-bottom: 8px;
+  background: rgba(0, 0, 0, 0.15);
 }
-.event-marker-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+.tide__legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tide__swatch {
+  display: inline-block;
+  width: 14px;
+  height: 8px;
+  border-radius: 2px;
+}
+.tide__swatch--ceiling {
+  background: linear-gradient(90deg, rgba(244, 135, 113, 0.6), rgba(244, 135, 113, 0.2));
+  border: 1px dashed var(--bad);
+}
+.tide__swatch--floor {
+  background: linear-gradient(90deg, rgba(137, 209, 133, 0.6), rgba(137, 209, 133, 0.2));
+  border: 1px dashed var(--ok);
+}
+.tide__swatch--active {
+  background: linear-gradient(180deg, var(--info), rgba(79, 193, 255, 0.15));
+}
+.tide__swatch--target {
+  background: var(--violet);
+  height: 2px;
+}
+.tide__swatch--scale_up {
+  background: var(--ok);
+  width: 3px;
+  height: 10px;
+}
+.tide__swatch--eviction {
+  background: var(--bad);
+  width: 3px;
+  height: 10px;
+}
+.tide__notice {
+  padding: 6px 18px 10px;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-family: var(--mono);
+}
+
+/* ============================================================
+   Snapshot ribbons (SnapshotRibbons.tsx)
+   ============================================================ */
+.ribbons {
+  padding: 14px 18px 18px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  max-height: 280px;
-  overflow: auto;
+  gap: 8px;
 }
-.event-marker-list--empty {
+.ribbons--empty {
+  padding: 24px;
+  color: var(--text-muted);
+  text-align: center;
+  font-size: 12px;
+}
+.ribbon-row {
+  display: grid;
+  grid-template-columns: 96px 1fr 76px;
+  gap: 12px;
+  align-items: center;
+}
+.ribbon-row--total {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+.ribbon-row__lbl {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+.ribbon-row--total .ribbon-row__lbl {
+  color: var(--text-strong);
+}
+.ribbon-row__num {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-strong);
+  text-align: right;
+}
+.ribbon-row--total .ribbon-row__num {
+  color: var(--info);
+}
+.ribbon-bar {
+  position: relative;
+  height: 12px;
+  background: var(--bg-elev);
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.ribbon-row--total .ribbon-bar {
+  height: 14px;
+}
+.ribbon-bar__fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-radius: 3px;
+  transition: width 250ms ease-out;
+}
+.ribbon-bar__fill--ready {
+  background: linear-gradient(90deg, #4f9c74, var(--ok));
+}
+.ribbon-bar__fill--busy {
+  background: linear-gradient(90deg, #2e7fd1, var(--info));
+}
+.ribbon-bar__fill--prov {
+  background: linear-gradient(90deg, #8a6e1e, var(--warn));
+}
+.ribbon-bar__fill--drain {
+  background: linear-gradient(90deg, #7a52c5, var(--violet));
+}
+.ribbon-bar__fill--total {
+  background: linear-gradient(90deg, rgba(79, 193, 255, 0.7), var(--info));
+}
+.ribbon-bar__tick {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 1px;
+}
+.ribbon-bar__tick--min {
+  background: var(--ok);
+  box-shadow: 0 0 4px var(--ok);
+}
+.ribbon-bar__tick--max {
+  background: var(--bad);
+  box-shadow: 0 0 4px var(--bad);
+}
+.ribbon-bar__tick--target {
+  background: var(--info);
+  box-shadow: 0 0 6px var(--info);
+  width: 2px;
+}
+
+/* ============================================================
+   Decision tape (EventMarkerList.tsx)
+   ============================================================ */
+.tape {
+  padding: 6px 0;
+  max-height: 360px;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+}
+.tape::-webkit-scrollbar {
+  width: 8px;
+}
+.tape::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 4px;
+}
+.tape--empty {
   padding: 16px;
   color: var(--text-muted);
   text-align: center;
   font-size: 12px;
 }
-.event-marker-list__row {
+.tape-item {
   display: grid;
-  grid-template-columns: 140px 80px 1fr;
+  grid-template-columns: 64px 18px 1fr;
   gap: 10px;
-  align-items: baseline;
-  padding: 4px 8px;
-  border-left: 2px solid var(--border-strong);
-  font-size: 12px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--border);
+  align-items: start;
 }
-.event-marker-list__pill {
+.tape-item:last-child {
+  border-bottom: none;
+}
+.tape-item__ts {
   font-family: var(--mono);
   font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-  padding: 2px 8px;
-  border-radius: 10px;
-  background: var(--bg-elev);
-  color: var(--text-strong);
-  border: 1px solid var(--border-strong);
-  text-align: center;
+  color: var(--text-dim);
+  padding-top: 2px;
+  white-space: nowrap;
 }
-.event-marker-list__pill--node_provisioned { color: var(--ok); border-color: var(--ok); }
-.event-marker-list__pill--node_evicted { color: var(--bad); border-color: var(--bad); }
-.event-marker-list__pill--node_replaced { color: var(--violet); border-color: var(--violet); }
-.event-marker-list__pill--scale_up { color: var(--info); border-color: var(--info); }
-.event-marker-list__pill--scale_down { color: var(--warn); border-color: var(--warn); }
-.event-marker-list__time {
-  font-family: var(--mono);
+.tape-item__pill {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  margin-top: 3px;
+}
+.tape-item__pill--scale_up {
+  background: var(--ok);
+  box-shadow: 0 0 8px rgba(137, 209, 133, 0.5);
+}
+.tape-item__pill--scale_down {
+  background: var(--violet);
+}
+.tape-item__pill--node_evicted {
+  background: var(--bad);
+  box-shadow: 0 0 8px rgba(244, 135, 113, 0.5);
+}
+.tape-item__pill--node_provisioned {
+  background: var(--info);
+}
+.tape-item__pill--node_replaced {
+  background: var(--violet);
+}
+.tape-item__pill--generic {
+  background: var(--border-strong);
+}
+.tape-item__what {
+  font-size: 12px;
+  color: var(--text);
+  font-weight: 500;
+}
+.tape-item__why {
   font-size: 11px;
   color: var(--text-muted);
+  margin-top: 3px;
+  line-height: 1.5;
 }
-.event-marker-list__payload {
+.tape-item__why code {
   font-family: var(--mono);
+  color: var(--info);
+  background: rgba(79, 193, 255, 0.08);
+  padding: 1px 5px;
+  border-radius: 3px;
   font-size: 11px;
-  color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+/* ============================================================
+   Page-level grid (ScalingTimelinePage.tsx)
+   ============================================================ */
+.scaling-grid {
+  display: grid;
+  grid-template-columns: 1.8fr 1fr;
+  gap: 18px;
+}
+@media (max-width: 1080px) {
+  .scaling-grid {
+    grid-template-columns: 1fr;
+  }
 }

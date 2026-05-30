@@ -1,24 +1,18 @@
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type BatchProgress, type BatchStatus } from "../lib/api";
-import { formatDuration, formatNumber, formatPercent, formatRate } from "../lib/format";
+import { api, type BatchProgress } from "../lib/api";
 import { useI18n } from "../lib/i18n";
-
-const TERMINAL_STATES: BatchStatus[] = ["done", "cancelled", "failed"];
-
-function meterColor(status: BatchStatus): string {
-  switch (status) {
-    case "paused": return "warn";
-    case "queued": return "";
-    case "done": return "ok";
-    case "failed": return "warn";
-    case "cancelled": return "";
-    default: return "violet";
-  }
-}
+import { useToast } from "../lib/useToast";
+import { downloadCsv, csvDateStamp } from "../lib/csv";
+import { BatchesTableRow, isCancellableBatch } from "./BatchesTableRow";
 
 export function BatchesTable() {
   const queryClient = useQueryClient();
   const { t } = useI18n();
+  const toast = useToast();
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
   const batches = useQuery({
     queryKey: ["batches"],
     queryFn: () => api.listBatches().then((r) => r.batches),
@@ -31,24 +25,180 @@ export function BatchesTable() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["batches"] }),
   });
 
-  const rows: BatchProgress[] = batches.data ?? [];
+  const allRows: BatchProgress[] = batches.data ?? [];
+  const rows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return allRows;
+    return allRows.filter(
+      (b) =>
+        b.batch_id.toLowerCase().includes(q) ||
+        b.source.toLowerCase().includes(q) ||
+        b.status.toLowerCase().includes(q),
+    );
+  }, [allRows, search]);
+
+  // Reconcile selected set against current rows (prune ids no longer present
+  // and ids that are no longer cancellable). Bounded by `rows.length`.
+  const visibleSelected = useMemo(() => {
+    const present = new Set<string>();
+    for (const r of rows) {
+      if (selected.has(r.batch_id) && isCancellableBatch(r)) present.add(r.batch_id);
+    }
+    return present;
+  }, [rows, selected]);
+
+  const cancellableRows = useMemo(() => rows.filter(isCancellableBatch), [rows]);
+  const allSelected =
+    cancellableRows.length > 0 && cancellableRows.every((r) => visibleSelected.has(r.batch_id));
+
+  function toggleOne(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  function toggleAll() {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allSelected) {
+        for (const r of cancellableRows) next.delete(r.batch_id);
+      } else {
+        for (const r of cancellableRows) next.add(r.batch_id);
+      }
+      return next;
+    });
+  }
+  function clearSelection() {
+    setSelected(new Set());
+  }
+
+  async function bulkCancel() {
+    const ids = Array.from(visibleSelected);
+    if (ids.length === 0) return;
+    let ok = 0;
+    let failed = 0;
+    // Sequential to respect server policy and surface per-id errors clearly.
+    for (const id of ids) {
+      try {
+        await api.cancelBatch(id);
+        ok += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    queryClient.invalidateQueries({ queryKey: ["batches"] });
+    clearSelection();
+    if (failed === 0) toast(t("toast.bulkCancelled", { n: ok }), "success");
+    else toast(t("toast.bulkCancelFailed"), failed === ids.length ? "error" : "info");
+  }
+
+  function exportCsv() {
+    const headers = [
+      "batch_id",
+      "source",
+      "status",
+      "total",
+      "percent",
+      "throughput_per_second",
+      "eta_seconds",
+      "workers_active",
+      "workers_target",
+    ];
+    const data = rows.map((b) => [
+      b.batch_id,
+      b.source,
+      b.status,
+      b.total,
+      Number(b.percent.toFixed(2)),
+      Number(b.throughput_per_second.toFixed(3)),
+      b.eta_seconds ?? "",
+      b.workers_active,
+      b.workers_target,
+    ]);
+    if (data.length === 0) {
+      toast(t("toast.csvEmpty"), "info");
+      return;
+    }
+    downloadCsv(`batches-${csvDateStamp()}.csv`, headers, data);
+    toast(t("toast.csvExported", { n: data.length }), "success");
+  }
 
   return (
     <section className="panel">
       <div className="panel-head">
         <span className="title">{t("batches.title", { n: rows.length })}</span>
         <span className="meta">{t("batches.meta")}</span>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+          <label className="toolbar-search" aria-label={t("common.search")}>
+            <span aria-hidden>⌕</span>
+            <input
+              type="search"
+              value={search}
+              placeholder={t("batches.table.search.placeholder")}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            {search && (
+              <button
+                className="clear"
+                onClick={() => setSearch("")}
+                title={t("common.clear")}
+                aria-label={t("common.clear")}
+              >
+                ×
+              </button>
+            )}
+          </label>
+          <button
+            className="btn"
+            onClick={exportCsv}
+            disabled={rows.length === 0}
+            title={t("common.exportCsv")}
+          >
+            ⇩ CSV
+          </button>
+        </div>
       </div>
+
+      {visibleSelected.size > 0 && (
+        <div
+          className="bulk-bar"
+          role="region"
+          aria-label={t("batches.table.bulkBar.title", { n: visibleSelected.size })}
+        >
+          <span>{t("batches.table.bulkBar.title", { n: visibleSelected.size })}</span>
+          <span className="grow" />
+          <button className="btn" onClick={bulkCancel} disabled={cancelMut.isPending}>
+            {t("batches.table.bulkBar.cancel")}
+          </button>
+          <button className="btn" onClick={clearSelection}>
+            {t("batches.table.bulkBar.clear")}
+          </button>
+        </div>
+      )}
+
       {rows.length === 0 ? (
         <div className="empty">
           {batches.isLoading
             ? t("batches.empty.loading")
+            : search
+            ? t("common.noResults")
             : t("batches.empty.none")}
         </div>
       ) : (
         <table className="batches">
           <thead>
             <tr>
+              <th style={{ width: 28 }}>
+                <input
+                  type="checkbox"
+                  aria-label={t("common.selectAll")}
+                  checked={allSelected}
+                  onChange={toggleAll}
+                  disabled={cancellableRows.length === 0}
+                />
+              </th>
               <th style={{ width: "28%" }}>{t("batches.col.batch")}</th>
               <th style={{ width: 80 }}>{t("batches.col.requests")}</th>
               <th>{t("batches.col.progress")}</th>
@@ -60,78 +210,17 @@ export function BatchesTable() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((b) => {
-              const evObs = Number(
-                (b.metadata && (b.metadata as Record<string, unknown>).evictions_observed) ?? 0
-              );
-              const nodeCounts = (b.metadata?.node_counts ?? {}) as Record<string, number>;
-              const nodeIds = Object.keys(nodeCounts);
-              return (
-              <tr key={b.batch_id}>
-                <td className="name id-cell">
-                  <div className="id">{b.batch_id}</div>
-                  <div className="src">
-                    {b.source}
-                    {evObs > 0 && (
-                      <span
-                        title={t("batches.evictTooltip", { n: evObs })}
-                        style={{ marginLeft: 6, color: "#e6c47a" }}
-                      >
-                        ⚠ {evObs}
-                      </span>
-                    )}
-                    {nodeIds.length > 0 && (
-                      <span
-                        title={nodeIds
-                          .map((id) => `${id}: ${nodeCounts[id]}`)
-                          .join("\n")}
-                        style={{ marginLeft: 6, opacity: 0.6 }}
-                      >
-                        · {t(nodeIds.length === 1 ? "batches.nodes" : "batches.nodes_plural", {
-                          n: nodeIds.length,
-                        })}
-                      </span>
-                    )}
-                  </div>
-                </td>
-                <td>{formatNumber(b.total)}</td>
-                <td>
-                  <div className="prog">
-                    <div className={`meter ${meterColor(b.status)}`}>
-                      <span style={{ width: `${b.percent}%` }} />
-                    </div>
-                    <span className="pct">{formatPercent(b.percent)}</span>
-                  </div>
-                </td>
-                <td>{formatRate(b.throughput_per_second)}</td>
-                <td>
-                  {b.status === "done"
-                    ? t("batches.status.done")
-                    : b.status === "cancelled"
-                    ? t("batches.status.cancelled")
-                    : b.status === "failed"
-                    ? t("batches.status.failed")
-                    : formatDuration(b.eta_seconds)}
-                </td>
-                <td>
-                  {b.workers_active}/{b.workers_target}
-                </td>
-                <td>
-                  <span className={`tag ${b.status}`}>{b.status}</span>
-                </td>
-                <td className="row-act">
-                  <button
-                    className="icon-btn"
-                    onClick={() => cancelMut.mutate(b.batch_id)}
-                    disabled={TERMINAL_STATES.includes(b.status) || cancelMut.isPending}
-                    title={t("batches.cancel")}
-                  >
-                    ✕
-                  </button>
-                </td>
-              </tr>
-              );
-            })}
+            {rows.map((b) => (
+              <BatchesTableRow
+                key={b.batch_id}
+                batch={b}
+                checked={visibleSelected.has(b.batch_id)}
+                cancellable={isCancellableBatch(b)}
+                cancelPending={cancelMut.isPending}
+                onToggle={toggleOne}
+                onCancel={(id) => cancelMut.mutate(id)}
+              />
+            ))}
           </tbody>
         </table>
       )}
